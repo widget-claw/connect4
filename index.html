@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CONNECT 4</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg:     #2d0922;
+    --bg2:    #3a0f2e;
+    --text:   #ffffff;
+    --dim:    #aaaaaa;
+    --border: #555555;
+    --cyan:   #00d4d4;
+    --orange: #ef4c00;
+    --green:  #4e9a06;
+    --red:    #cc0000;
+    --ubuntu: #e95420;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #1a1a1a;
+    font-family: 'Ubuntu Mono', 'Courier New', monospace;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 20px 0 40px;
+  }
+
+  #app { width: 100%; max-width: 460px; padding: 0 12px; }
+
+  .titlebar {
+    background: #3c3c3c;
+    border-radius: 8px 8px 0 0;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid #222;
+    border-bottom: none;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot-r { background: #ff5f57; }
+  .dot-y { background: #ffbd2e; }
+  .dot-g { background: #28c940; }
+  .win-title { flex: 1; text-align: center; font-size: 12px; color: #aaa; letter-spacing: 1px; }
+
+  .terminal {
+    background: var(--bg);
+    border: 1px solid #111;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    padding: 16px 14px 20px;
+    color: var(--text);
+    min-height: 300px;
+  }
+
+  .out  { font-size: 14px; line-height: 1.75; color: var(--text); }
+  .odim { font-size: 14px; line-height: 1.75; color: var(--dim); }
+  .odash{ font-size: 14px; line-height: 1.75; color: var(--border); }
+  .gap  { margin-top: 12px; }
+  .gap2 { margin-top: 6px; }
+
+  .p1c { color: var(--cyan); }
+  .p2c { color: var(--orange); }
+
+  .scores { margin-bottom: 6px; }
+
+  .boardwrap { margin: 6px 0; }
+  .bpre {
+    font-family: 'Ubuntu Mono', monospace;
+    font-size: clamp(13px, 3.8vw, 17px);
+    line-height: 1.55;
+    white-space: pre;
+    display: inline-block;
+    color: var(--text);
+  }
+  .col-hdr {
+    cursor: pointer;
+    color: var(--dim);
+    transition: color 0.1s;
+    display: inline;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    letter-spacing: inherit;
+  }
+  .col-hdr:hover  { color: var(--ubuntu); }
+  .col-hdr.active { color: var(--text); cursor: pointer; }
+  .col-hdr.disabled { color: #333; cursor: not-allowed; pointer-events: none; }
+
+  .ce { color: #555; }
+  .cp1 { color: var(--cyan); }
+  .cp2 { color: var(--orange); }
+  .cw  { animation: wblink 0.45s step-end infinite; font-weight: 700; }
+  @keyframes wblink { 0%,100%{opacity:1} 50%{opacity:0.1} }
+
+  .colbtns {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 3px;
+    margin: 8px 0;
+  }
+  .cbtn {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    color: var(--dim);
+    font-family: 'Ubuntu Mono', monospace;
+    font-size: 16px;
+    padding: 11px 0;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: all 0.08s;
+  }
+  .cbtn.active { border-color: #666; color: var(--text); }
+  .cbtn:hover:not(:disabled), .cbtn:active:not(:disabled) {
+    background: #3d1500;
+    border-color: var(--ubuntu);
+    color: var(--ubuntu);
+  }
+  .cbtn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+  .status { font-size: 14px; line-height: 1.8; min-height: 22px; }
+  .st-wait { color: var(--dim); }
+  .st-turn { color: var(--green); }
+  .st-win  { color: var(--ubuntu); font-weight: 700; }
+  .st-lose { color: var(--red); }
+  .st-draw { color: var(--dim); }
+
+  @keyframes tokendrop {
+    0%   { opacity: 0; transform: translateY(-6px); }
+    40%  { opacity: 1; transform: translateY(2px); }
+    100% { transform: translateY(0); }
+  }
+  .just-dropped { animation: tokendrop 0.18s ease-out; }
+
+  .mbtn {
+    display: flex; align-items: baseline; gap: 0;
+    background: none; border: none;
+    font-family: 'Ubuntu Mono', monospace;
+    font-size: 14px; color: var(--text);
+    cursor: pointer; padding: 5px 0;
+    line-height: 1.6; width: 100%; text-align: left;
+  }
+  .mbtn:hover .mt, .mbtn:active .mt { color: var(--ubuntu); text-decoration: underline; }
+  .mt-c { color: var(--cyan); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="titlebar">
+    <div class="dot dot-r"></div>
+    <div class="dot dot-y"></div>
+    <div class="dot dot-g"></div>
+    <div class="win-title">user@ubuntu: ~/connect4</div>
+  </div>
+
+  <div class="terminal">
+    <div class="out gap">CONNECT 4 — 2 Player (Local)</div>
+    <div class="odash">------------------------------</div>
+    <div class="out">Player 1: <span class="p1c">(X)</span></div>
+    <div class="out">Player 2: <span class="p2c">(0)</span></div>
+    <div class="odash">------------------------------</div>
+
+    <div class="scores">
+      <div class="out">SCORE</div>
+      <div class="odash">------------------------------</div>
+      <div class="out">Player 1 <span class="p1c">(X)</span>: <b id="score-p1">0</b></div>
+      <div class="out">Player 2 <span class="p2c">(0)</span>: <b id="score-p2">0</b></div>
+      <div class="out">Draws: <b id="score-draw">0</b></div>
+      <div class="odash">------------------------------</div>
+    </div>
+
+    <div class="boardwrap">
+      <div class="bpre" id="board-display"></div>
+    </div>
+
+    <div class="colbtns" id="col-buttons">
+      <button class="cbtn" onclick="playColumn(0)">1</button>
+      <button class="cbtn" onclick="playColumn(1)">2</button>
+      <button class="cbtn" onclick="playColumn(2)">3</button>
+      <button class="cbtn" onclick="playColumn(3)">4</button>
+      <button class="cbtn" onclick="playColumn(4)">5</button>
+      <button class="cbtn" onclick="playColumn(5)">6</button>
+      <button class="cbtn" onclick="playColumn(6)">7</button>
+    </div>
+
+    <div class="status" id="game-status"></div>
+
+    <button class="mbtn gap" onclick="resetGame()">
+      <span class="odim">&gt;&nbsp;</span><span class="mt mt-c">New Game</span>
+    </button>
+  </div>
+</div>
+
+<script>
+const ROWS = 6, COLS = 7, EMPTY = 0, P1 = 1, P2 = 2;
+
+let board = [];
+let moveStr = '';
+let currentPlayer = P1;
+let gameOver = false;
+let scores = { 1: 0, 2: 0, draw: 0 };
+
+function createBoard() {
+  return Array.from({length:ROWS}, () => Array(COLS).fill(EMPTY));
+}
+
+function replayMoves(str) {
+  const b = createBoard();
+  for (let i = 0; i < str.length; i++) {
+    const col = parseInt(str[i]);
+    dropToken(b, col, i % 2 === 0 ? P1 : P2);
+  }
+  return b;
+}
+
+function dropToken(board, col, player) {
+  for (let r = ROWS-1; r >= 0; r--) {
+    if (board[r][col] === EMPTY) { board[r][col] = player; return r; }
+  }
+  return -1;
+}
+
+function checkWin(board, player) {
+  for (let r=0;r<ROWS;r++)
+    for (let c=0;c<=COLS-4;c++)
+      if ([0,1,2,3].every(i=>board[r][c+i]===player))
+        return [[r,c],[r,c+1],[r,c+2],[r,c+3]];
+  for (let r=0;r<=ROWS-4;r++)
+    for (let c=0;c<COLS;c++)
+      if ([0,1,2,3].every(i=>board[r+i][c]===player))
+        return [[r,c],[r+1,c],[r+2,c],[r+3,c]];
+  for (let r=0;r<=ROWS-4;r++)
+    for (let c=0;c<=COLS-4;c++)
+      if ([0,1,2,3].every(i=>board[r+i][c+i]===player))
+        return [[r,c],[r+1,c+1],[r+2,c+2],[r+3,c+3]];
+  for (let r=3;r<ROWS;r++)
+    for (let c=0;c<=COLS-4;c++)
+      if ([0,1,2,3].every(i=>board[r-i][c+i]===player))
+        return [[r,c],[r-1,c+1],[r-2,c+2],[r-3,c+3]];
+  return null;
+}
+
+function isFull(board) { return board[0].every(c=>c!==EMPTY); }
+function colFull(board, c) { return board[0][c]!==EMPTY; }
+
+function renderBoard(board, winPos) {
+  const ws = winPos ? new Set(winPos.map(([r,c])=>`${r},${c}`)) : new Set();
+  let headerCells = Array.from({length:COLS},(_,i)=>
+    `<span class="col-hdr" data-col="${i}" onclick="playColumn(${i})">${i+1}</span>`
+  ).join(' ');
+  let out = ' ' + headerCells + '\n';
+  out += '+' + '-'.repeat(COLS*2-1) + '+\n';
+  for (let r=0;r<ROWS;r++) {
+    let row = '|';
+    for (let c=0;c<COLS;c++) {
+      if (c>0) row += ' ';
+      const v = board[r][c], k = `${r},${c}`;
+      if (ws.has(k)) {
+        row += `<span class="cp${v} cw">${v===P1?'X':'0'}</span>`;
+      } else if (v===P1) {
+        row += `<span class="cp1">X</span>`;
+      } else if (v===P2) {
+        row += `<span class="cp2">0</span>`;
+      } else {
+        row += `<span class="ce">.</span>`;
+      }
+    }
+    out += row + '|\n';
+  }
+  out += '+' + '-'.repeat(COLS*2-1) + '+';
+  document.getElementById('board-display').innerHTML = out;
+}
+
+function setCols(enabled, board) {
+  document.querySelectorAll('.cbtn').forEach((btn,i) => {
+    const full = board ? colFull(board,i) : false;
+    btn.disabled = !enabled || full;
+    btn.classList.toggle('active', enabled && !full);
+  });
+}
+
+function updateScores() {
+  document.getElementById('score-p1').textContent = scores[1];
+  document.getElementById('score-p2').textContent = scores[2];
+  document.getElementById('score-draw').textContent = scores.draw;
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('game-status');
+  el.textContent = msg;
+  el.className = 'status ' + (cls||'');
+}
+
+function renderGame() {
+  const board = replayMoves(moveStr);
+  const winPos = checkWin(board, currentPlayer === P1 ? P1 : P2);
+  const draw = !winPos && isFull(board);
+  
+  renderBoard(board, winPos);
+  
+  if (winPos) {
+    gameOver = true;
+    const winner = currentPlayer === P1 ? P2 : P1; // Winner is previous player
+    if (winner === P1) {
+      scores[1]++;
+      setStatus('Player 1 (X) WINS!', 'st-win');
+    } else {
+      scores[2]++;
+      setStatus('Player 2 (0) wins.', 'st-lose');
+    }
+    updateScores();
+    setCols(false);
+  } else if (draw) {
+    gameOver = true;
+    scores.draw++;
+    updateScores();
+    setStatus("Draw! The board is full.", 'st-draw');
+    setCols(false);
+  } else {
+    if (currentPlayer === P1) {
+      setStatus("Player 1's turn (X)", 'st-turn');
+    } else {
+      setStatus("Player 2's turn (0)", 'st-wait');
+    }
+    setCols(true, board);
+  }
+}
+
+function playColumn(col) {
+  if (gameOver) return;
+  const board = replayMoves(moveStr);
+  if (colFull(board, col)) return;
+  if (moveStr.length >= 42) return;
+  
+  moveStr += String(col);
+  currentPlayer = currentPlayer === P1 ? P2 : P1;
+  renderGame();
+}
+
+function resetGame() {
+  board = createBoard();
+  moveStr = '';
+  currentPlayer = P1;
+  gameOver = false;
+  setStatus("Player 1's turn (X)", 'st-turn');
+  renderGame();
+}
+
+// Keyboard input
+document.addEventListener('keydown', e => {
+  const n = parseInt(e.key);
+  if (n >= 1 && n <= 7) playColumn(n - 1);
+});
+
+// Init
+resetGame();
+</script>
+</body>
+</html>
