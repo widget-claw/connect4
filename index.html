@@ -398,9 +398,9 @@ const MAX_SCORE = (W*H+1)/2 - 3;
 const BOTTOM = (1n<<0n)|(1n<<7n)|(1n<<14n)|(1n<<21n)|(1n<<28n)|(1n<<35n)|(1n<<42n);
 const BOARD = BOTTOM * ((1n<<H)-1n);
 
-function colMask(c) { return (((1n<<H)-1n) << BigInt(c*(H+1))); }
-function topMask(c) { return 1n << BigInt((H-1)+c*(H+1)); }
-function botMask(c) { return 1n << BigInt(c*(H+1)); }
+function colMask(c) { return (((1n<<BigInt(H))-1n) << BigInt(c)*BigInt(H+1)); }
+function topMask(c) { return 1n << (BigInt(H-1)+BigInt(c)*BigInt(H+1)); }
+function botMask(c) { return 1n << (BigInt(c)*BigInt(H+1)); }
 function popcnt(m) { let c=0n; for(;m;m&=m-1n)c++; return Number(c); }
 
 function computeWinPos(pos, mask) {
