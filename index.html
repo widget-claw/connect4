@@ -870,18 +870,21 @@ function playColumn(col) {
   if (moveStr.length>=42) return;
   
   if (aiMode || local2Player) {
-    // Local play
+    // Human plays
     moveStr += String(col);
-    if (aiMode) {
-      aiPosition.playCol(col);
-      // AI's turn
-      if (!gameOver && moveStr.length < 42) {
-        const aiCol = aiGetBestMove(aiPosition);
-        moveStr += String(aiCol);
-        aiPosition.playCol(aiCol);
-      }
-    }
+    if (aiMode) aiPosition.playCol(col);
     renderGameState();
+    
+    // Check if game ended
+    if (gameOver) return;
+    
+    // AI plays (if 1-player mode)
+    if (aiMode && moveStr.length < 42) {
+      const aiCol = aiGetBestMove(aiPosition);
+      moveStr += String(aiCol);
+      aiPosition.playCol(aiCol);
+      renderGameState();
+    }
   } else {
     // Multiplayer via Firebase
     db.ref('rooms/'+roomCode+'/moves').set(moveStr + String(col));
