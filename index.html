@@ -404,7 +404,7 @@ function botMask(c) { return 1n << (BigInt(c)*BigInt(H+1)); }
 function popcnt(m) { let c=0n; for(;m;m&=m-1n)c++; return Number(c); }
 
 function computeWinPos(pos, mask) {
-  let r = (pos<<1n)&(pos<<2n)&(pos<<3n);
+  let r = (pos<<BigInt(H+1))&(pos<<BigInt(2*(H+1)))&(pos<<BigInt(3*(H+1)));
   let p = (pos<<BigInt(H+1))&(pos<<BigInt(2*(H+1)));
   r |= p & (pos<<BigInt(3*(H+1))) | p & (pos>>BigInt(H+1));
   p = (pos>>BigInt(H+1))&(pos>>BigInt(2*(H+1)));
