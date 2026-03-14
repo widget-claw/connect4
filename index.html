@@ -260,21 +260,27 @@
     <!-- ── LOBBY ─────────────────────────────────── -->
     <div id="screen-lobby" class="screen active">
       <div class="prompt">
-        <span class="pu">user</span><span class="pd">@</span><span class="ph">ubuntu</span><span class="pd">:</span><span class="pp">~/connect4</span><span class="pd">$</span> python3 connect4.py --multiplayer
+        <span class="pu">user</span><span class="pd">@</span><span class="ph">ubuntu</span><span class="pd">:</span><span class="pp">~/connect4</span><span class="pd">$</span> python3 connect4.py
       </div>
 
-      <div class="out gap">CONNECT 4 — Multiplayer</div>
+      <div class="out gap">CONNECT 4</div>
       <div class="odash">------------------------------</div>
       <div class="out">Player 1: <span class="p1c">(X)</span></div>
       <div class="out">Player 2: <span class="p2c">(0)</span></div>
       <div class="odash">------------------------------</div>
 
       <div class="gap2">
+        <button class="mbtn" onclick="start1Player()">
+          <span class="pd">&gt;&nbsp;</span><span class="mt">[1] 1 Player</span>
+        </button>
+        <button class="mbtn" onclick="start2Player()">
+          <span class="pd">&gt;&nbsp;</span><span class="mt">[2] 2 Player</span>
+        </button>
         <button class="mbtn" onclick="createRoom()">
-          <span class="pd">&gt;&nbsp;</span><span class="mt">[1] Create a new room</span>
+          <span class="pd">&gt;&nbsp;</span><span class="mt">[3] Create a new room</span>
         </button>
         <button class="mbtn" onclick="focusJoin()">
-          <span class="pd">&gt;&nbsp;</span><span class="mt mt-o">[2] Join existing room</span>
+          <span class="pd">&gt;&nbsp;</span><span class="mt">[4] Join existing room</span>
         </button>
       </div>
 
@@ -379,6 +385,116 @@ let moveStr   = '';   // The entire game state — a string up to 42 digits.
                       // e.g.  "3621453" = 7 moves played so far
 let scores    = { 1: 0, 2: 0 };
 let gameOver  = false;
+let aiMode = false;    // 1-player mode: human vs AI
+let local2Player = false;  // 2-player local mode
+let aiPosition = null;  // Bitboard for AI solver
+
+// ================================================================
+//  AI SOLVER - Negamax with bitboard (Pascal Pons algorithm)
+// ================================================================
+const W = 7, H = 6;
+const MIN_SCORE = -(W*H)/2 + 3;
+const MAX_SCORE = (W*H+1)/2 - 3;
+const BOTTOM = (1n<<0n)|(1n<<7n)|(1n<<14n)|(1n<<21n)|(1n<<28n)|(1n<<35n)|(1n<<42n);
+const BOARD = BOTTOM * ((1n<<H)-1n);
+
+function colMask(c) { return (((1n<<H)-1n) << BigInt(c*(H+1))); }
+function topMask(c) { return 1n << BigInt((H-1)+c*(H+1)); }
+function botMask(c) { return 1n << BigInt(c*(H+1)); }
+function popcnt(m) { let c=0n; for(;m;m&=m-1n)c++; return Number(c); }
+
+function computeWinPos(pos, mask) {
+  let r = (pos<<1n)&(pos<<2n)&(pos<<3n);
+  let p = (pos<<BigInt(H+1))&(pos<<BigInt(2*(H+1)));
+  r |= p & (pos<<BigInt(3*(H+1))) | p & (pos>>BigInt(H+1));
+  p = (pos>>BigInt(H+1))&(pos>>BigInt(2*(H+1)));
+  r |= p & (pos<<BigInt(H+1)) | p & (pos>>BigInt(3*(H+1)));
+  p = (pos<<BigInt(H))&(pos<<BigInt(2*H));
+  r |= p & (pos<<BigInt(3*H)) | p & (pos>>BigInt(H));
+  p = (pos>>BigInt(H))&(pos>>BigInt(2*H));
+  r |= p & (pos<<BigInt(H)) | p & (pos>>BigInt(3*H));
+  p = (pos<<BigInt(H+2))&(pos<<BigInt(2*(H+2)));
+  r |= p & (pos<<BigInt(3*(H+2))) | p & (pos>>BigInt(H+2));
+  p = (pos>>BigInt(H+2))&(pos>>BigInt(2*(H+2)));
+  r |= p & (pos<<BigInt(H+2)) | p & (pos>>BigInt(3*(H+2)));
+  return r & (BOARD ^ mask);
+}
+
+class AIPosition {
+  constructor() { this.cur = 0n; this.mask = 0n; this.moves = 0; }
+  clone() { const p = new AIPosition(); p.cur = this.cur; p.mask = this.mask; p.moves = this.moves; return p; }
+  key() { return this.cur + this.mask; }
+  canPlay(c) { return (this.mask & topMask(c)) === 0n; }
+  winningPos() { return computeWinPos(this.cur, this.mask); }
+  oppWinPos() { return computeWinPos(this.cur ^ this.mask, this.mask); }
+  possible() { return (this.mask + BOTTOM) & BOARD; }
+  isWinning(c) { return (this.winningPos() & this.possible() & colMask(c)) !== 0n; }
+  playCol(c) {
+    const m = (this.mask + botMask(c)) & colMask(c);
+    this.cur ^= this.mask;
+    this.mask |= m;
+    this.moves++;
+  }
+  getValidMoves() { const m = []; for(let c=0;c<W;c++) if(this.canPlay(c)) m.push(c); return m; }
+}
+
+const aiTransTable = new Map();
+
+function negamax(pos, alpha, beta) {
+  const possible = pos.possible();
+  if (possible === 0n) return -(W*H - pos.moves)/2;
+  if (pos.moves >= W*H - 2) return 0;
+  let min = -(W*H - 2 - pos.moves)/2;
+  if (alpha < min) { alpha = min; if (alpha >= beta) return alpha; }
+  let max = (W*H - 1 - pos.moves)/2;
+  if (beta > max) { beta = max; if (alpha >= beta) return beta; }
+  const key = pos.key();
+  if (aiTransTable.has(key)) {
+    const v = aiTransTable.get(key);
+    if (v > MAX_SCORE - MIN_SCORE + 1) {
+      min = v + 2*MIN_SCORE - MAX_SCORE - 2;
+      if (alpha < min) { alpha = min; if (alpha >= beta) return alpha; }
+    } else {
+      max = v + MIN_SCORE - 1;
+      if (beta > max) { beta = max; if (alpha >= beta) return beta; }
+    }
+  }
+  const moves = pos.getValidMoves();
+  for (const c of moves) {
+    const p2 = pos.clone();
+    p2.playCol(c);
+    const score = -negamax(p2, -beta, -alpha);
+    if (score >= beta) { aiTransTable.set(key, score+MAX_SCORE-2*MIN_SCORE+2); return score; }
+    if (score > alpha) alpha = score;
+  }
+  aiTransTable.set(key, alpha - MIN_SCORE + 1);
+  return alpha;
+}
+
+function solveAI(pos) {
+  aiTransTable.clear();
+  const scores = [];
+  for(let c=0;c<W;c++) {
+    if (!pos.canPlay(c)) { scores[c] = null; continue; }
+    if (pos.isWinning(c)) { scores[c] = (W*H+1-pos.moves)/2; continue; }
+    const p2 = pos.clone();
+    p2.playCol(c);
+    scores[c] = -negamax(p2, -100, 100);
+  }
+  return scores;
+}
+
+function aiGetBestMove(pos) {
+  const scores = solveAI(pos);
+  let best = pos.getValidMoves()[0], bestScore = -Infinity;
+  for(let c=0;c<W;c++) {
+    if (scores[c] !== null && scores[c] > bestScore) {
+      bestScore = scores[c];
+      best = c;
+    }
+  }
+  return best;
+}
 
 // ================================================================
 //  FIREBASE INIT
@@ -520,6 +636,52 @@ function lobbyErr(msg) {
 function focusJoin() {
   document.getElementById('join-row').style.display = 'flex';
   setTimeout(()=>document.getElementById('join-code').focus(), 50);
+}
+
+function start1Player() {
+  // 1 Player: Human (P1) vs AI (P2)
+  aiMode = true;
+  local2Player = false;
+  roomCode = '';
+  myPlayer = P1;
+  moveStr = '';
+  scores = { 1: 0, 2: 0 };
+  gameOver = false;
+  aiPosition = new AIPosition();
+  
+  document.getElementById('game-room-code').textContent = '1 Player (vs AI)';
+  document.getElementById('player-badge').textContent = 'Player 1  X (You)';
+  document.getElementById('player-badge').style.color = 'var(--cyan)';
+  document.getElementById('new-game-btn').style.display = 'none';
+  document.getElementById('fb-dot').style.display = 'none';
+  document.getElementById('fb-status').style.display = 'none';
+  
+  updateScores();
+  show('screen-game');
+  renderGameState();
+}
+
+function start2Player() {
+  // 2 Player local
+  aiMode = false;
+  local2Player = true;
+  roomCode = '';
+  myPlayer = P1;
+  moveStr = '';
+  scores = { 1: 0, 2: 0 };
+  gameOver = false;
+  aiPosition = null;
+  
+  document.getElementById('game-room-code').textContent = '2 Player (Local)';
+  document.getElementById('player-badge').textContent = 'Player 1  X';
+  document.getElementById('player-badge').style.color = 'var(--cyan)';
+  document.getElementById('new-game-btn').style.display = 'none';
+  document.getElementById('fb-dot').style.display = 'none';
+  document.getElementById('fb-status').style.display = 'none';
+  
+  updateScores();
+  show('screen-game');
+  renderGameState();
 }
 
 async function createRoom() {
@@ -695,7 +857,24 @@ function playColumn(col) {
   if ((moveStr.length%2===0 ? P1 : P2) !== myPlayer) return;
   if (colFull(board,col)) return;
   if (moveStr.length>=42) return;
-  db.ref('rooms/'+roomCode+'/moves').set(moveStr + String(col));
+  
+  if (aiMode || local2Player) {
+    // Local play
+    moveStr += String(col);
+    if (aiMode) {
+      aiPosition.playCol(col);
+      // AI's turn
+      if (!gameOver && moveStr.length < 42) {
+        const aiCol = aiGetBestMove(aiPosition);
+        moveStr += String(aiCol);
+        aiPosition.playCol(aiCol);
+      }
+    }
+    renderGameState();
+  } else {
+    // Multiplayer via Firebase
+    db.ref('rooms/'+roomCode+'/moves').set(moveStr + String(col));
+  }
 }
 
 function requestNewGame() {
@@ -711,11 +890,15 @@ function leaveGame() {
     db.ref('.info/connected').off();
   }
   roomCode=''; moveStr=''; scores={1:0,2:0}; gameOver=false; myPlayer=0;
+  aiMode=false; local2Player=false;
+  aiPosition=null;
   const btn=document.getElementById('new-game-btn');
   btn.style.display='none'; btn.disabled=false;
   btn.querySelector('.mt').textContent='Play again? (y/n): y ↵';
   document.getElementById('join-row').style.display='none';
   document.getElementById('join-code').value='';
+  document.getElementById('fb-dot').style.display = 'inline-block';
+  document.getElementById('fb-status').style.display = 'inline';
   show('screen-lobby');
 }
 
