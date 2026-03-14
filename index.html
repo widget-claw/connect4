@@ -514,8 +514,11 @@ function initFirebase() {
   try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
-    return firebaseConfig.apiKey !== 'YOUR_API_KEY';
-  } catch(e) { return false; }
+    return true;
+  } catch(e) { 
+    console.log('Firebase init error:', e);
+    return false; 
+  }
 }
 
 // ================================================================
@@ -865,7 +868,17 @@ function renderGameState() {
 function playColumn(col) {
   if (gameOver) return;
   const board = replayMoves(moveStr);
-  if ((moveStr.length%2===0 ? P1 : P2) !== myPlayer) return;
+  const currentPlayer = (moveStr.length % 2 === 0) ? P1 : P2;
+  
+  // Check if it's this player's turn
+  if (aiMode) {
+    if (currentPlayer !== P1) return; // AI's turn, can't play
+  } else if (local2Player) {
+    if (currentPlayer !== myPlayer) return;
+  } else {
+    if (currentPlayer !== myPlayer) return;
+  }
+  
   if (colFull(board,col)) return;
   if (moveStr.length>=42) return;
   
