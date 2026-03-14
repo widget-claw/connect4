@@ -5,12 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CONNECT 4</title>
 
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
 <link href="https://fonts.googleapis.com/css2?family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
 
 <style>
   :root {
     --bg:     #2d0922;
     --bg2:    #3a0f2e;
+    --bg3:    #1a0012;
     --text:   #ffffff;
     --dim:    #aaaaaa;
     --border: #555555;
@@ -26,15 +30,22 @@
   body {
     background: #1a1a1a;
     font-family: 'Ubuntu Mono', 'Courier New', monospace;
-    min-height: 100vh;
+    height: 100vh;
+    overflow-y: auto;   /* scroll safety net */
     display: flex;
-    align-items: flex-start;
+    align-items: stretch;
     justify-content: center;
-    padding: 20px 0 40px;
   }
 
-  #app { width: 100%; max-width: 460px; padding: 0 12px; }
+  #app {
+    width: 100%;
+    max-width: 460px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
 
+  /* Window chrome */
   .titlebar {
     background: #3c3c3c;
     border-radius: 8px 8px 0 0;
@@ -56,11 +67,40 @@
     border: 1px solid #111;
     border-top: none;
     border-radius: 0 0 6px 6px;
-    padding: 16px 14px 20px;
+    padding: 8px 8px 8px;
     color: var(--text);
-    min-height: 300px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
   }
 
+  /* Game screen fills terminal height */
+  #screen-game { flex: 1; }
+
+  /* Board wrap takes all remaining space */
+  .boardwrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    margin: 2px 0;
+  }
+
+  /* Screens */
+  .screen { display: none !important; }
+  .screen.active { display: block !important; }
+
+  /* Game screen overrides to flex so board can flex-grow */
+  #screen-game.active { display: flex !important; flex-direction: column; }
+
+  /* Prompt */
+  .prompt { font-size: 14px; line-height: 1.6; margin-bottom: 2px; }
+  .pu { color: var(--green); font-weight: 700; }
+  .ph { color: var(--green); font-weight: 700; }
+  .pp { color: var(--cyan); }
+  .pd { color: var(--dim); }
+
+  /* Output */
   .out  { font-size: 14px; line-height: 1.75; color: var(--text); }
   .odim { font-size: 14px; line-height: 1.75; color: var(--dim); }
   .odash{ font-size: 14px; line-height: 1.75; color: var(--border); }
@@ -70,17 +110,65 @@
   .p1c { color: var(--cyan); }
   .p2c { color: var(--orange); }
 
-  .scores { margin-bottom: 6px; }
+  /* Menu buttons */
+  .mbtn {
+    display: flex; align-items: baseline; gap: 0;
+    background: none; border: none;
+    font-family: 'Ubuntu Mono', monospace;
+    font-size: 14px; color: var(--text);
+    cursor: pointer; padding: 5px 0;
+    line-height: 1.6; width: 100%; text-align: left;
+  }
+  .mbtn:hover .mt, .mbtn:active .mt { color: var(--ubuntu); text-decoration: underline; }
+  .mt-o { color: var(--ubuntu); }
+  .mt-r { color: var(--red); }
+  .mt-c { color: var(--cyan); }
 
-  .boardwrap { margin: 6px 0; }
+  /* Input */
+  .irow { display: flex; align-items: baseline; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .tinput {
+    background: transparent;
+    border: none; border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Ubuntu Mono', monospace;
+    font-size: 24px; padding: 4px 4px;
+    width: 100px; letter-spacing: 10px;
+    outline: none; caret-color: var(--text);
+  }
+  .tinput:focus { border-bottom-color: var(--ubuntu); }
+
+  /* Room code */
+  .codebox {
+    margin: 12px 0;
+    border-left: 3px solid var(--ubuntu);
+    padding: 12px 14px;
+    background: var(--bg2);
+  }
+  .codelabel { font-size: 11px; color: var(--dim); letter-spacing: 2px; margin-bottom: 6px; }
+  .codenum   { font-size: 52px; font-weight: 700; color: var(--ubuntu); letter-spacing: 14px; line-height: 1.1; }
+  .codehint  { font-size: 11px; color: var(--dim); margin-top: 6px; }
+
+  /* Cursor */
+  .cur {
+    display: inline-block; width: 8px; height: 15px;
+    background: var(--text); vertical-align: middle; margin-left: 1px;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* Scoreboard */
+  .scores { margin-bottom: 2px; }
+
+  /* Board — fills full terminal width, font size set by JS */
   .bpre {
     font-family: 'Ubuntu Mono', monospace;
-    font-size: clamp(13px, 3.8vw, 17px);
-    line-height: 1.55;
+    font-size: 16px; /* overridden by fitBoard() */
+    line-height: 1.5;
     white-space: pre;
-    display: inline-block;
+    display: block;
     color: var(--text);
   }
+  /* Clickable column header numbers */
   .col-hdr {
     cursor: pointer;
     color: var(--dim);
@@ -101,38 +189,24 @@
   .cw  { animation: wblink 0.45s step-end infinite; font-weight: 700; }
   @keyframes wblink { 0%,100%{opacity:1} 50%{opacity:0.1} }
 
-  .colbtns {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 3px;
-    margin: 8px 0;
-  }
-  .cbtn {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    color: var(--dim);
-    font-family: 'Ubuntu Mono', monospace;
-    font-size: 16px;
-    padding: 11px 0;
-    cursor: pointer;
-    touch-action: manipulation;
-    transition: all 0.08s;
-  }
-  .cbtn.active { border-color: #666; color: var(--text); }
-  .cbtn:hover:not(:disabled), .cbtn:active:not(:disabled) {
-    background: #3d1500;
-    border-color: var(--ubuntu);
-    color: var(--ubuntu);
-  }
-  .cbtn:disabled { opacity: 0.25; cursor: not-allowed; }
 
-  .status { font-size: 14px; line-height: 1.8; min-height: 22px; }
+
+  /* Status */
+  .status { font-size: 13px; line-height: 1.6; min-height: 20px; margin: 2px 0; }
   .st-wait { color: var(--dim); }
-  .st-turn { color: var(--green); }
+  .st-p1   { color: var(--cyan); }
+  .st-p2   { color: var(--orange); }
   .st-win  { color: var(--ubuntu); font-weight: 700; }
   .st-lose { color: var(--red); }
   .st-draw { color: var(--dim); }
 
+  /* Move string display */
+  .movestr { color: var(--border); font-size: 11px; margin-top: 2px; }
+  .movestr b { color: #666; }
+
+  hr.t { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+
+  /* Drop animation — new token flashes in */
   @keyframes tokendrop {
     0%   { opacity: 0; transform: translateY(-6px); }
     40%  { opacity: 1; transform: translateY(2px); }
@@ -140,20 +214,35 @@
   }
   .just-dropped { animation: tokendrop 0.18s ease-out; }
 
-  .mbtn {
-    display: flex; align-items: baseline; gap: 0;
-    background: none; border: none;
-    font-family: 'Ubuntu Mono', monospace;
-    font-size: 14px; color: var(--text);
-    cursor: pointer; padding: 5px 0;
-    line-height: 1.6; width: 100%; text-align: left;
+  /* Firebase connection dot */
+  .fb-dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 5px;
+    background: var(--border);
+    vertical-align: middle;
   }
-  .mbtn:hover .mt, .mbtn:active .mt { color: var(--ubuntu); text-decoration: underline; }
-  .mt-c { color: var(--cyan); }
+  .fb-dot.connected    { background: var(--green); box-shadow: 0 0 4px var(--green); }
+  .fb-dot.disconnected { background: var(--red); }
+  .fb-status { font-size: 11px; color: var(--dim); }
+
+  .err { color: var(--red); font-size: 13px; min-height: 20px; margin-top: 4px; }
+
+  .notice {
+    border-left: 3px solid var(--red);
+    padding: 10px 12px;
+    background: var(--bg2);
+    font-size: 12px;
+    color: var(--dim);
+    line-height: 1.7;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .notice b { color: var(--text); }
 </style>
 </head>
 <body>
 <div id="app">
+
   <div class="titlebar">
     <div class="dot dot-r"></div>
     <div class="dot dot-y"></div>
@@ -162,63 +251,160 @@
   </div>
 
   <div class="terminal">
-    <div class="out gap">CONNECT 4 — 2 Player (Local)</div>
-    <div class="odash">------------------------------</div>
-    <div class="out">Player 1: <span class="p1c">(X)</span></div>
-    <div class="out">Player 2: <span class="p2c">(0)</span></div>
-    <div class="odash">------------------------------</div>
 
-    <div class="scores">
-      <div class="out">SCORE</div>
+    <div id="firebase-notice" class="notice">
+      <b>Firebase not configured.</b><br>
+      Edit the firebaseConfig block in the &lt;script&gt; tag. See inline comments.
+    </div>
+
+    <!-- ── LOBBY ─────────────────────────────────── -->
+    <div id="screen-lobby" class="screen active">
+      <div class="prompt">
+        <span class="pu">user</span><span class="pd">@</span><span class="ph">ubuntu</span><span class="pd">:</span><span class="pp">~/connect4</span><span class="pd">$</span> python3 connect4.py --multiplayer
+      </div>
+
+      <div class="out gap">CONNECT 4 — Multiplayer</div>
       <div class="odash">------------------------------</div>
-      <div class="out">Player 1 <span class="p1c">(X)</span>: <b id="score-p1">0</b></div>
-      <div class="out">Player 2 <span class="p2c">(0)</span>: <b id="score-p2">0</b></div>
-      <div class="out">Draws: <b id="score-draw">0</b></div>
+      <div class="out">Player 1: <span class="p1c">(X)</span></div>
+      <div class="out">Player 2: <span class="p2c">(0)</span></div>
       <div class="odash">------------------------------</div>
+
+      <div class="gap2">
+        <button class="mbtn" onclick="createRoom()">
+          <span class="pd">&gt;&nbsp;</span><span class="mt">[1] Create a new room</span>
+        </button>
+        <button class="mbtn" onclick="focusJoin()">
+          <span class="pd">&gt;&nbsp;</span><span class="mt mt-o">[2] Join existing room</span>
+        </button>
+      </div>
+
+      <div class="irow" id="join-row" style="display:none">
+        <span class="odim">room code:</span>
+        <input class="tinput" type="number" id="join-code" placeholder="0000"
+               maxlength="4" oninput="this.value=this.value.slice(0,4)"
+               onkeydown="if(event.key==='Enter')joinRoom()">
+        <button class="mbtn" style="width:auto" onclick="joinRoom()">
+          <span class="mt mt-o">JOIN ↵</span>
+        </button>
+      </div>
+
+      <div class="err" id="lobby-error"></div>
     </div>
 
-    <div class="boardwrap">
-      <div class="bpre" id="board-display"></div>
+    <!-- ── WAITING ────────────────────────────────── -->
+    <div id="screen-waiting" class="screen">
+      <div class="prompt">
+        <span class="pu">user</span><span class="pd">@</span><span class="ph">ubuntu</span><span class="pd">:</span><span class="pp">~/connect4</span><span class="pd">$</span> connect4 --create-room
+      </div>
+
+      <div class="out gap">Room created. Waiting for opponent...</div>
+
+      <div class="codebox">
+        <div class="codelabel">ROOM CODE — READ THIS TO YOUR OPPONENT</div>
+        <div class="codenum" id="display-code">----</div>
+        <div class="codehint">Call them. Say the 4 digits. They type it in.</div>
+      </div>
+
+      <div class="odim">Listening<span class="cur"></span></div>
+
+      <button class="mbtn gap" onclick="cancelRoom()">
+        <span class="pd">&gt;&nbsp;</span><span class="mt mt-r">^C&nbsp;&nbsp;Cancel</span>
+      </button>
     </div>
 
-    <div class="colbtns" id="col-buttons">
-      <button class="cbtn" onclick="playColumn(0)">1</button>
-      <button class="cbtn" onclick="playColumn(1)">2</button>
-      <button class="cbtn" onclick="playColumn(2)">3</button>
-      <button class="cbtn" onclick="playColumn(3)">4</button>
-      <button class="cbtn" onclick="playColumn(4)">5</button>
-      <button class="cbtn" onclick="playColumn(5)">6</button>
-      <button class="cbtn" onclick="playColumn(6)">7</button>
+    <!-- ── GAME ───────────────────────────────────── -->
+    <div id="screen-game" class="screen">
+
+      <div class="out" style="margin-bottom:4px;font-size:13px">Player 1 <span class="p1c">(X)</span>: <b id="score-p1">0</b> &nbsp;&nbsp; Player 2 <span class="p2c">(0)</span>: <b id="score-p2">0</b></div>
+
+      <div class="boardwrap">
+        <div class="bpre" id="board-display"></div>
+      </div>
+
+
+
+      <div class="status" id="game-status"></div>
+
+      <!-- Raw move string — shows exactly what Firebase stores -->
+      <div class="movestr"><b>moves: </b>"<span id="move-str-display"></span>"</div>
+
+      <button class="mbtn" id="new-game-btn" onclick="requestNewGame()" style="display:none">
+        <span class="pd">&gt;&nbsp;</span><span class="mt mt-c">Play again? (y/n): y ↵</span>
+      </button>
+
+
+
+      <div class="odim" style="margin-top:8px;font-size:12px">
+        Room: <b id="game-room-code">----</b> &nbsp;|&nbsp; You are: <b id="player-badge">?</b> &nbsp;|&nbsp;<span class="fb-dot" id="fb-dot"></span><span class="fb-status" id="fb-status">connecting...</span>
+      </div>
     </div>
 
-    <div class="status" id="game-status"></div>
-
-    <button class="mbtn gap" onclick="resetGame()">
-      <span class="odim">&gt;&nbsp;</span><span class="mt mt-c">New Game</span>
-    </button>
   </div>
 </div>
 
 <script>
+// ================================================================
+//  FIREBASE CONFIG
+//  Replace with your own project values.
+//
+//  SETUP (free, ~5 min):
+//  1. console.firebase.google.com → New project (free Spark plan)
+//  2. Add app → Web → copy the firebaseConfig object shown
+//  3. Build → Realtime Database → Create database → Test mode
+//  4. Paste your values into the object below
+// ================================================================
+const firebaseConfig = {
+  apiKey:            "AIzaSyAo97sl7fZVaDm4uM2wgUPKMXPx1eNSm30",
+  authDomain:        "connect4-3c9f0.firebaseapp.com",
+  databaseURL:       "https://connect4-3c9f0-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "connect4-3c9f0",
+  storageBucket:     "connect4-3c9f0.firebasestorage.app",
+  messagingSenderId: "876372963899",
+  appId:             "1:876372963899:web:711200624f11b8c863221e"
+};
+
+// ================================================================
+//  CONSTANTS
+// ================================================================
 const ROWS = 6, COLS = 7, EMPTY = 0, P1 = 1, P2 = 2;
 
-let board = [];
-let moveStr = '';
-let currentPlayer = P1;
-let gameOver = false;
-let scores = { 1: 0, 2: 0, draw: 0 };
+// ================================================================
+//  STATE
+// ================================================================
+let db;
+let myPlayer = 0;
+let roomCode  = '';
+let moveStr   = '';   // The entire game state — a string up to 42 digits.
+                      // Each char is a column index (0–6). Nothing else.
+                      // e.g.  "3621453" = 7 moves played so far
+let scores    = { 1: 0, 2: 0 };
+let gameOver  = false;
 
+// ================================================================
+//  FIREBASE INIT
+// ================================================================
+function initFirebase() {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    return firebaseConfig.apiKey !== 'YOUR_API_KEY';
+  } catch(e) { return false; }
+}
+
+// ================================================================
+//  BOARD LOGIC  — mirrors connect4.py exactly
+// ================================================================
 function createBoard() {
   return Array.from({length:ROWS}, () => Array(COLS).fill(EMPTY));
 }
 
 function replayMoves(str) {
-  const b = createBoard();
+  const board = createBoard();
   for (let i = 0; i < str.length; i++) {
     const col = parseInt(str[i]);
-    dropToken(b, col, i % 2 === 0 ? P1 : P2);
+    dropToken(board, col, i % 2 === 0 ? P1 : P2);
   }
-  return b;
+  return board;
 }
 
 function dropToken(board, col, player) {
@@ -229,18 +415,22 @@ function dropToken(board, col, player) {
 }
 
 function checkWin(board, player) {
+  // Horizontal
   for (let r=0;r<ROWS;r++)
     for (let c=0;c<=COLS-4;c++)
       if ([0,1,2,3].every(i=>board[r][c+i]===player))
         return [[r,c],[r,c+1],[r,c+2],[r,c+3]];
+  // Vertical
   for (let r=0;r<=ROWS-4;r++)
     for (let c=0;c<COLS;c++)
       if ([0,1,2,3].every(i=>board[r+i][c]===player))
         return [[r,c],[r+1,c],[r+2,c],[r+3,c]];
+  // Diagonal ↘
   for (let r=0;r<=ROWS-4;r++)
     for (let c=0;c<=COLS-4;c++)
       if ([0,1,2,3].every(i=>board[r+i][c+i]===player))
         return [[r,c],[r+1,c+1],[r+2,c+2],[r+3,c+3]];
+  // Diagonal ↗
   for (let r=3;r<ROWS;r++)
     for (let c=0;c<=COLS-4;c++)
       if ([0,1,2,3].every(i=>board[r-i][c+i]===player))
@@ -248,12 +438,16 @@ function checkWin(board, player) {
   return null;
 }
 
-function isFull(board) { return board[0].every(c=>c!==EMPTY); }
+function isFull(board)     { return board[0].every(c=>c!==EMPTY); }
 function colFull(board, c) { return board[0][c]!==EMPTY; }
 
+// ================================================================
+//  RENDER BOARD  — ASCII, matches Python print_board
+// ================================================================
 function renderBoard(board, winPos) {
   const ws = winPos ? new Set(winPos.map(([r,c])=>`${r},${c}`)) : new Set();
-  let headerCells = Array.from({length:COLS},(_,i)=>
+  // Header row — each number is a clickable span
+  let headerCells = Array.from({length:COLS},(_,i) =>
     `<span class="col-hdr" data-col="${i}" onclick="playColumn(${i})">${i+1}</span>`
   ).join(' ');
   let out = ' ' + headerCells + '\n';
@@ -275,22 +469,23 @@ function renderBoard(board, winPos) {
     }
     out += row + '|\n';
   }
-  out += '+' + '-'.repeat(COLS*2-1) + '+';
+  out += '+' + '-'.repeat(COLS*2-1) + '\n';
+  // Footer row — mirrors header, same clickable col-hdr spans
+  const footerCells = Array.from({length:COLS},(_,i) =>
+    `<span class="col-hdr" data-col="${i}" onclick="playColumn(${i})">${i+1}</span>`
+  ).join(' ');
+  out += ' ' + footerCells;
   document.getElementById('board-display').innerHTML = out;
+
+  fitBoard();
 }
 
-function setCols(enabled, board) {
-  document.querySelectorAll('.cbtn').forEach((btn,i) => {
-    const full = board ? colFull(board,i) : false;
-    btn.disabled = !enabled || full;
-    btn.classList.toggle('active', enabled && !full);
-  });
-}
-
-function updateScores() {
-  document.getElementById('score-p1').textContent = scores[1];
-  document.getElementById('score-p2').textContent = scores[2];
-  document.getElementById('score-draw').textContent = scores.draw;
+// ================================================================
+//  UI HELPERS
+// ================================================================
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
 }
 
 function setStatus(msg, cls) {
@@ -299,69 +494,300 @@ function setStatus(msg, cls) {
   el.className = 'status ' + (cls||'');
 }
 
-function renderGame() {
+function setCols(enabled, board) {
+  document.querySelectorAll('.col-hdr').forEach(el => {
+    const i = parseInt(el.dataset.col);
+    const full = board ? colFull(board,i) : false;
+    el.classList.toggle('active', enabled && !full);
+    el.classList.toggle('disabled', !enabled || full);
+  });
+}
+
+function updateScores() {
+  document.getElementById('score-p1').textContent = scores[1];
+  document.getElementById('score-p2').textContent = scores[2];
+}
+
+function lobbyErr(msg) {
+  const el = document.getElementById('lobby-error');
+  el.textContent = '# ' + msg;
+  setTimeout(()=>el.textContent='', 3000);
+}
+
+// ================================================================
+//  LOBBY
+// ================================================================
+function focusJoin() {
+  document.getElementById('join-row').style.display = 'flex';
+  setTimeout(()=>document.getElementById('join-code').focus(), 50);
+}
+
+async function createRoom() {
+  if (!db) { document.getElementById('firebase-notice').style.display='block'; return; }
+  let code, snap;
+  do {
+    code = String(Math.floor(1000 + Math.random() * 9000));
+    snap = await db.ref('rooms/'+code).once('value');
+  } while(snap.exists());
+
+  roomCode = code;
+  myPlayer = P1;
+  await db.ref('rooms/'+code).set({ moves:'', scores:'0,0', ng:0, joined:false, created: Date.now() });
+  document.getElementById('display-code').textContent = code;
+  show('screen-waiting');
+
+  // Watch for P2 to join
+  db.ref('rooms/'+code+'/joined').on('value', snap => {
+    if (snap.val() === true) {
+      db.ref('rooms/'+code+'/joined').off();
+      enterGame(code);
+    }
+  });
+}
+
+async function joinRoom() {
+  if (!db) { document.getElementById('firebase-notice').style.display='block'; return; }
+  const v = document.getElementById('join-code').value.trim();
+  if (!/^\d{4}$/.test(v)) { lobbyErr('Enter a 4-digit code'); return; }
+
+  const snap = await db.ref('rooms/'+v).once('value');
+  if (!snap.exists())       { lobbyErr('Room not found'); return; }
+  if (snap.val().joined)    { lobbyErr('Room is full');   return; }
+
+  roomCode = v;
+  myPlayer = P2;
+  await db.ref('rooms/'+v+'/joined').set(true);  // notifies P1's waiting screen
+  enterGame(v);
+}
+
+function cancelRoom() {
+  db.ref('rooms/'+roomCode+'/joined').off();
+  db.ref('rooms/'+roomCode).remove();
+  roomCode='';
+  show('screen-lobby');
+}
+
+// ================================================================
+//  GAME
+// ================================================================
+function enterGame(code) {
+  roomCode=code; moveStr=''; scores={1:0,2:0}; gameOver=false;
+  document.getElementById('game-room-code').textContent = code;
+  const badge = myPlayer===P1 ? 'Player 1  X (cyan)' : 'Player 2  0 (red)';
+  const col   = myPlayer===P1 ? 'var(--cyan)' : 'var(--orange)';
+  document.getElementById('player-badge').textContent = badge;
+  document.getElementById('player-badge').style.color = col;
+  document.getElementById('new-game-btn').style.display = 'none';
+  updateScores(); show('screen-game');
+
+  // Firebase connection indicator
+  db.ref('.info/connected').on('value', snap => {
+    const dot = document.getElementById('fb-dot');
+    const lbl = document.getElementById('fb-status');
+    if (!dot) return;
+    if (snap.val()) {
+      dot.className = 'fb-dot connected';
+      lbl.textContent = 'live';
+    } else {
+      dot.className = 'fb-dot disconnected';
+      lbl.textContent = 'offline';
+    }
+  });
+
+  // ── moves is a plain string. That's it. ──────────────────────
+  db.ref('rooms/'+code+'/moves').on('value', snap => {
+    moveStr = snap.val() || '';
+    document.getElementById('move-str-display').textContent = moveStr;
+    renderGameState();
+  });
+
+  db.ref('rooms/'+code+'/scores').on('value', snap => {
+    const s = snap.val();
+    if (s) { const p=s.split(','); scores[1]=+p[0]||0; scores[2]=+p[1]||0; updateScores(); }
+  });
+
+  db.ref('rooms/'+code+'/ng').on('value', snap => {
+    const v = snap.val()||0;
+    if (v>=2 || (v===1 && myPlayer===P1)) {
+      if (myPlayer===P1) {
+        db.ref('rooms/'+code+'/moves').set('');
+        db.ref('rooms/'+code+'/ng').set(0);
+      }
+      gameOver=false;
+      const btn=document.getElementById('new-game-btn');
+      btn.style.display='none'; btn.disabled=false;
+      btn.querySelector('.mt').textContent='Play again? (y/n): y ↵';
+    }
+  });
+}
+
+let prevMoveLen = 0;
+
+function renderGameState() {
   const board = replayMoves(moveStr);
-  const winPos = checkWin(board, currentPlayer === P1 ? P1 : P2);
-  const draw = !winPos && isFull(board);
-  
+  const turn  = moveStr.length%2===0 ? P1 : P2;
+  const last  = moveStr.length>0 ? (moveStr.length%2===0 ? P2 : P1) : null;
+  const winPos = last ? checkWin(board, last) : null;
+  const draw   = !winPos && isFull(board);
+  gameOver = !!(winPos||draw);
   renderBoard(board, winPos);
-  
+
+  // Animate the most recently dropped token (skip if it's a winning move)
+  if (moveStr.length > prevMoveLen && moveStr.length > 0 && !winPos) {
+    const lastCol = parseInt(moveStr[moveStr.length-1]);
+    const tmpBoard = replayMoves(moveStr.slice(0, -1));
+    for (let r = ROWS-1; r >= 0; r--) {
+      if (tmpBoard[r][lastCol] === EMPTY) {
+        const spans = document.getElementById('board-display').querySelectorAll('span.cp1, span.cp2, span.ce, span.cw');
+        const idx = r * COLS + lastCol;
+        if (spans[idx]) {
+          spans[idx].classList.remove('just-dropped');
+          void spans[idx].offsetWidth;
+          spans[idx].classList.add('just-dropped');
+        }
+        break;
+      }
+    }
+  }
+
+  // Win flash — trigger all 4 tokens together cleanly
+  if (winPos && moveStr.length > prevMoveLen) {
+    setTimeout(() => {
+      document.querySelectorAll('.cw').forEach(el => {
+        el.classList.remove('cw');
+        void el.offsetWidth;
+        el.classList.add('cw');
+      });
+    }, 20);
+  }
+
+  prevMoveLen = moveStr.length;
+
+  const sym = p => p===P1 ? 'X' : '0';
+
   if (winPos) {
-    gameOver = true;
-    const winner = currentPlayer === P1 ? P2 : P1; // Winner is previous player
-    if (winner === P1) {
-      scores[1]++;
-      setStatus('Player 1 (X) WINS!', 'st-win');
+    if (last===myPlayer) {
+      setStatus(`Player ${myPlayer} (${sym(myPlayer)}) WINS!`, 'st-win');
+      if (myPlayer===P1) { scores[myPlayer]++; db.ref('rooms/'+roomCode+'/scores').set(scores[1]+','+scores[2]); }
     } else {
-      scores[2]++;
-      setStatus('Player 2 (0) wins.', 'st-lose');
+      setStatus(`Player ${last} (${sym(last)}) wins.`, 'st-lose');
+      if (myPlayer===P2) { scores[last]++; db.ref('rooms/'+roomCode+'/scores').set(scores[1]+','+scores[2]); }
     }
-    updateScores();
-    setCols(false);
+    setCols(false); document.getElementById('new-game-btn').style.display='block';
   } else if (draw) {
-    gameOver = true;
-    scores.draw++;
-    updateScores();
     setStatus("Draw! The board is full.", 'st-draw');
-    setCols(false);
+    setCols(false); document.getElementById('new-game-btn').style.display='block';
   } else {
-    if (currentPlayer === P1) {
-      setStatus("Player 1's turn (X)", 'st-turn');
+    if (turn===myPlayer) {
+      setStatus(`Player ${myPlayer}'s turn (${sym(myPlayer)})`, myPlayer===P1?'st-p1':'st-p2');
+      setCols(true, board);
     } else {
-      setStatus("Player 2's turn (0)", 'st-wait');
+      setStatus(`Player ${turn}'s turn (${sym(turn)})`, turn===P1?'st-p1':'st-p2');
+      setCols(false);
     }
-    setCols(true, board);
   }
 }
 
+// ── The ENTIRE data transfer: one digit appended to a string ───
 function playColumn(col) {
   if (gameOver) return;
   const board = replayMoves(moveStr);
-  if (colFull(board, col)) return;
-  if (moveStr.length >= 42) return;
-  
-  moveStr += String(col);
-  currentPlayer = currentPlayer === P1 ? P2 : P1;
-  renderGame();
+  if ((moveStr.length%2===0 ? P1 : P2) !== myPlayer) return;
+  if (colFull(board,col)) return;
+  if (moveStr.length>=42) return;
+  db.ref('rooms/'+roomCode+'/moves').set(moveStr + String(col));
 }
 
-function resetGame() {
-  board = createBoard();
-  moveStr = '';
-  currentPlayer = P1;
-  gameOver = false;
-  setStatus("Player 1's turn (X)", 'st-turn');
-  renderGame();
+function requestNewGame() {
+  const btn = document.getElementById('new-game-btn');
+  btn.querySelector('.mt').textContent='⏳ waiting for opponent...';
+  btn.disabled=true;
+  db.ref('rooms/'+roomCode+'/ng').transaction(v=>(v||0)+1);
 }
 
-// Keyboard input
+function leaveGame() {
+  if (roomCode) {
+    ['moves','scores','ng'].forEach(k=>db.ref('rooms/'+roomCode+'/'+k).off());
+    db.ref('.info/connected').off();
+  }
+  roomCode=''; moveStr=''; scores={1:0,2:0}; gameOver=false; myPlayer=0;
+  const btn=document.getElementById('new-game-btn');
+  btn.style.display='none'; btn.disabled=false;
+  btn.querySelector('.mt').textContent='Play again? (y/n): y ↵';
+  document.getElementById('join-row').style.display='none';
+  document.getElementById('join-code').value='';
+  show('screen-lobby');
+}
+
+// ================================================================
+//  FIT BOARD TO FULL WIDTH
+//  Board row = 15 chars: |X X X X X X X|
+//  Ubuntu Mono char width ≈ 0.601 × font-size
+// ================================================================
+function fitBoard() {
+  const wrap = document.getElementById('board-display');
+  if (!wrap) return;
+
+  // Measure actual char dimensions at 16px
+  const probe = document.createElement('span');
+  probe.style.cssText = 'font-family:"Ubuntu Mono",monospace;font-size:16px;position:absolute;visibility:hidden;white-space:pre';
+  probe.textContent = 'X';
+  document.body.appendChild(probe);
+  const charW = probe.getBoundingClientRect().width;
+  const charH = probe.getBoundingClientRect().height;
+  document.body.removeChild(probe);
+
+  // ── Horizontal: font-size so 15 chars fill the container width ──
+  const containerWidth = wrap.parentElement.clientWidth;
+  const fs = Math.floor((containerWidth / charW) * 16 / 15);
+  wrap.style.fontSize = fs + 'px';
+
+  // ── Vertical: line-height so 10 board lines fit in ~55% of viewport ──
+  // Board: hdr + top-border + 6 rows + bot-border + footer = 10 lines
+  // Target ~55vh for the board, leaving room for scoreboard/status/info
+  const targetBoardPx = window.innerHeight * 0.55;
+  const lineHeightPx  = targetBoardPx / 10;
+  const lh = lineHeightPx / fs;
+  // Clamp between 0.85 (tight) and 1.8 (loose)
+  wrap.style.lineHeight = Math.max(0.85, Math.min(1.8, lh)).toFixed(3);
+}
+
+window.addEventListener('resize', fitBoard);
+
+// ================================================================
+//  KEYBOARD INPUT  — press 1-7 to drop a token
+// ================================================================
 document.addEventListener('keydown', e => {
-  const n = parseInt(e.key);
-  if (n >= 1 && n <= 7) playColumn(n - 1);
+  if (document.getElementById('screen-game').classList.contains('active')) {
+    const n = parseInt(e.key);
+    if (n >= 1 && n <= 7) playColumn(n - 1);
+  }
 });
 
-// Init
-resetGame();
+// ================================================================
+//  CLEANUP — delete rooms older than 24 hours on lobby load
+// ================================================================
+function cleanOldRooms() {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 hours ago
+  db.ref('rooms').once('value', snap => {
+    snap.forEach(child => {
+      const created = child.val().created;
+      if (!created || created < cutoff) {
+        db.ref('rooms/'+child.key).remove();
+      }
+    });
+  });
+}
+
+// ================================================================
+//  BOOT
+// ================================================================
+window.onload = () => {
+  const ok = initFirebase();
+  if (ok) cleanOldRooms();
+  if (!ok) document.getElementById('firebase-notice').style.display='block';
+  renderBoard(createBoard());
+};
 </script>
 </body>
 </html>
