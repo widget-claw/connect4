@@ -422,21 +422,30 @@ function computeWinPos(pos, mask) {
 
 class AIPosition {
   constructor() { this.cur = 0n; this.mask = 0n; this.moves = 0; }
-  clone() { const p = new AIPosition(); p.cur = this.cur; p.mask = this.mask; p.moves = this.moves; return p; }
-  key() { return this.cur + this.mask; }
-  canPlay(c) { return (this.mask & topMask(c)) === 0n; }
-  winningPos() { return computeWinPos(this.cur, this.mask); }
-  oppWinPos() { return computeWinPos(this.cur ^ this.mask, this.mask); }
-  possible() { return (this.mask + BOTTOM) & BOARD; }
-  isWinning(c) { return (this.winningPos() & this.possible() & colMask(c)) !== 0n; }
-  playCol(c) {
-    const m = (this.mask + botMask(c)) & colMask(c);
-    this.cur ^= this.mask;
-    this.mask |= m;
-    this.moves++;
-  }
-  getValidMoves() { const m = []; for(let c=0;c<W;c++) if(this.canPlay(c)) m.push(c); return m; }
 }
+
+AIPosition.prototype.clone = function() { 
+  const p = new AIPosition(); 
+  p.cur = this.cur; p.mask = this.mask; p.moves = this.moves; 
+  return p; 
+};
+AIPosition.prototype.key = function() { return this.cur + this.mask; };
+AIPosition.prototype.canPlay = function(c) { return (this.mask & topMask(c)) === 0n; };
+AIPosition.prototype.winningPos = function() { return computeWinPos(this.cur, this.mask); };
+AIPosition.prototype.oppWinPos = function() { return computeWinPos(this.cur ^ this.mask, this.mask); };
+AIPosition.prototype.possible = function() { return (this.mask + BOTTOM) & BOARD; };
+AIPosition.prototype.isWinning = function(c) { return (this.winningPos() & this.possible() & colMask(c)) !== 0n; };
+AIPosition.prototype.playCol = function(c) {
+  const m = (this.mask + botMask(c)) & colMask(c);
+  this.cur ^= this.mask;
+  this.mask |= m;
+  this.moves++;
+};
+AIPosition.prototype.getValidMoves = function() { 
+  const m = []; 
+  for(let c=0;c<W;c++) if(this.canPlay(c)) m.push(c); 
+  return m; 
+};
 
 const aiTransTable = new Map();
 
