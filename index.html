@@ -277,8 +277,8 @@
         <button class="mbtn" onclick="focusJoin()">
           <span class="pd">&gt;&nbsp;</span><span class="mt mt-o">[2] Join existing room</span>
         </button>
-        <button class="mbtn" onclick="startAI()">
-          <span class="pd">&gt;&nbsp;</span><span class="mt" style="color:var(--green)">[3] Play vs AI (perfect play)</span>
+        <button class="mbtn" onclick="startVsAI()">
+          <span class="pd">&gt;&nbsp;</span><span class="mt" style="color:var(--green)">[3] Play vs AI</span>
         </button>
       </div>
 
@@ -397,14 +397,12 @@ const ROWS = 6, COLS = 7, EMPTY = 0, P1 = 1, P2 = 2;
 let db;
 let myPlayer = 0;
 let roomCode  = '';
-let moveStr   = '';
+let moveStr   = '';   // The entire game state — a string up to 42 digits.
+                      // Each char is a column index (0–6). Nothing else.
+                      // e.g.  "3621453" = 7 moves played so far
 let scores    = { 1: 0, 2: 0 };
 let gameOver  = false;
-
-// AI mode state
 let aiMode = false;
-let aiPosition = null;
-let aiTransTable = new Map();
 
 // ================================================================
 //  FIREBASE INIT
@@ -413,11 +411,8 @@ function initFirebase() {
   try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
-    return true;
-  } catch(e) { 
-    console.log('Firebase init error:', e);
-    return false; 
-  }
+    return firebaseConfig.apiKey !== 'YOUR_API_KEY';
+  } catch(e) { return false; }
 }
 
 // ================================================================
@@ -550,49 +545,26 @@ function focusJoin() {
   setTimeout(()=>document.getElementById('join-code').focus(), 50);
 }
 
-async function createRoom() {
-  if (!db) { document.getElementById('firebase-notice').style.display='block'; return; }
-  let code, snap;
-  do {
-    code = String(Math.floor(1000 + Math.random() * 9000));
-    snap = await db.ref('rooms/'+code).once('value');
-  } while(snap.exists());
-
-  roomCode = code;
+function startVsAI() {
+  aiMode = true;
+  roomCode = '';
   myPlayer = P1;
-  await db.ref('rooms/'+code).set({ moves:'', scores:'0,0', ng:0, joined:false });
-  document.getElementById('display-code').textContent = code;
-  show('screen-waiting');
-
-  // Watch for P2 to join
-  db.ref('rooms/'+code+'/joined').on('value', snap => {
-    if (snap.val() === true) {
-      db.ref('rooms/'+code+'/joined').off();
-      enterGame(code);
-    }
-  });
-}
-
-async function joinRoom() {
-  if (!db) { document.getElementById('firebase-notice').style.display='block'; return; }
-  const v = document.getElementById('join-code').value.trim();
-  if (!/^\d{4}$/.test(v)) { lobbyErr('Enter a 4-digit code'); return; }
-
-  const snap = await db.ref('rooms/'+v).once('value');
-  if (!snap.exists())       { lobbyErr('Room not found'); return; }
-  if (snap.val().joined)    { lobbyErr('Room is full');   return; }
-
-  roomCode = v;
-  myPlayer = P2;
-  await db.ref('rooms/'+v+'/joined').set(true);  // notifies P1's waiting screen
-  enterGame(v);
-}
-
-function cancelRoom() {
-  db.ref('rooms/'+roomCode+'/joined').off();
-  db.ref('rooms/'+roomCode).remove();
-  roomCode='';
-  show('screen-lobby');
+  moveStr = '';
+  scores = {1:0, 2:0};
+  gameOver = false;
+  aiPosition = new AIPosition();
+  
+  // Initialize Web Worker for AI
+  initAIWorker();
+  
+  // Update UI for AI mode
+  document.getElementById('game-room-code').textContent = 'AI';
+  document.getElementById('player-badge').innerHTML = 'Player 1 (X) - YOU';
+  document.getElementById('player-badge').style.color = 'var(--cyan)';
+  document.getElementById('new-game-btn').style.display = 'none';
+  
+  updateScores();
+  show('screen-game');
 }
 
 // ================================================================
@@ -600,11 +572,123 @@ function cancelRoom() {
 // ================================================================
 
 // AI Bitboard implementation
+let aiPosition = null;
+let aiWorker = null;
+
+// Create Web Worker for AI (runs in background thread)
+function initAIWorker() {
+  const workerCode = `
 const W = 7, H = 6;
 const MIN_SCORE = -(W*H)/2 + 3;
 const MAX_SCORE = (W*H+1)/2 - 3;
 const BOTTOM = (1n<<0n)|(1n<<7n)|(1n<<14n)|(1n<<21n)|(1n<<28n)|(1n<<35n)|(1n<<42n);
-const BOARD = BOTTOM * ((1n<<H)-1n);
+const BOARD = BOTTOM * ((1n<<BigInt(H))-1n);
+const columnOrder = [3, 4, 2, 5, 1, 6, 0];
+
+function colMask(c) { return (((1n<<BigInt(H))-1n) << (BigInt(c)*BigInt(H+1))); }
+function topMask(c) { return 1n << (BigInt(H-1)+BigInt(c)*BigInt(H+1)); }
+function botMask(c) { return 1n << (BigInt(c)*BigInt(H+1)); }
+
+function computeWinPos(pos, mask) {
+  let r = (pos<<1n)&(pos<<2n)&(pos<<3n);
+  let p = (pos<<BigInt(H+1))&(pos<<BigInt(2*(H+1)));
+  r |= p & (pos<<BigInt(3*(H+1))) | p & (pos>>BigInt(H+1));
+  p = (pos>>BigInt(H+1))&(pos>>BigInt(2*(H+1)));
+  r |= p & (pos<<BigInt(H+1)) | p & (pos>>BigInt(3*(H+1)));
+  p = (pos<<BigInt(H))&(pos<<BigInt(2*H));
+  r |= p & (pos<<BigInt(3*H)) | p & (pos>>BigInt(H));
+  p = (pos>>BigInt(H))&(pos>>BigInt(2*H));
+  r |= p & (pos<<BigInt(H)) | p & (pos>>BigInt(3*H));
+  p = (pos<<BigInt(H+2))&(pos<<BigInt(2*(H+2)));
+  r |= p & (pos<<BigInt(3*(H+2))) | p & (pos>>BigInt(H+2));
+  p = (pos>>BigInt(H+2))&(pos>>BigInt(2*(H+2)));
+  r |= p & (pos<<BigInt(H+2)) | p & (pos>>BigInt(3*(H+2)));
+  return r & (BOARD ^ mask);
+}
+
+function Position() {
+  this.cur = 0n; this.mask = 0n; this.moves = 0;
+  this.clone = function() { const p = new Position(); p.cur = this.cur; p.mask = this.mask; p.moves = this.moves; return p; };
+  this.key = function() { return this.cur + this.mask; };
+  this.canPlay = function(c) { return (this.mask & topMask(c)) === 0n; };
+  this.winningPos = function() { return computeWinPos(this.cur, this.mask); };
+  this.oppWinPos = function() { return computeWinPos(this.cur ^ this.mask, this.mask); };
+  this.possible = function() { return (this.mask + BOTTOM) & BOARD; };
+  this.isWinning = function(c) { return (this.winningPos() & this.possible() & colMask(c)) !== 0n; };
+  this.playCol = function(c) { const m = (this.mask + botMask(c)) & colMask(c); this.cur ^= this.mask; this.mask |= m; this.moves++; };
+  this.getValidMoves = function() { const m = []; for(let c=0;c<W;c++) if(this.canPlay(c)) m.push(c); return m; };
+}
+
+const transTable = new Map();
+
+function negamax(pos, alpha, beta) {
+  const possible = pos.possible();
+  if (possible === 0n) return -(W*H - pos.moves)/2;
+  if (pos.moves >= W*H - 2) return 0;
+  let min = -(W*H - 2 - pos.moves)/2;
+  if (alpha < min) { alpha = min; if (alpha >= beta) return alpha; }
+  let max = (W*H - 1 - pos.moves)/2;
+  if (beta > max) { beta = max; if (alpha >= beta) return beta; }
+  const key = pos.key();
+  if (transTable.has(key)) {
+    const v = transTable.get(key);
+    if (v > MAX_SCORE - MIN_SCORE + 1) { min = v + 2*MIN_SCORE - MAX_SCORE - 2; if (alpha < min) { alpha = min; if (alpha >= beta) return alpha; } }
+    else { max = v + MIN_SCORE - 1; if (beta > max) { beta = max; if (alpha >= beta) return beta; } }
+  }
+  const moves = pos.getValidMoves().sort((a,b) => columnOrder.indexOf(a) - columnOrder.indexOf(b));
+  for (const c of moves) {
+    const p2 = pos.clone(); p2.playCol(c);
+    const score = -negamax(p2, -beta, -alpha);
+    if (score >= beta) { transTable.set(key, score+MAX_SCORE-2*MIN_SCORE+2); return score; }
+    if (score > alpha) alpha = score;
+  }
+  transTable.set(key, alpha - MIN_SCORE + 1);
+  return alpha;
+}
+
+function solve(pos) {
+  transTable.clear();
+  const scores = [];
+  for (let i=0; i<columnOrder.length; i++) {
+    const c = columnOrder[i];
+    if (!pos.canPlay(c)) { scores[c] = null; continue; }
+    if (pos.isWinning(c)) { scores[c] = (W*H+1-pos.moves)/2; continue; }
+    const p2 = pos.clone(); p2.playCol(c);
+    if (p2.oppWinPos() !== 0n) { scores[c] = null; continue; }
+    scores[c] = -negamax(p2, -100, 100);
+  }
+  return scores;
+}
+
+function getBestMove(moveStr) {
+  const pos = new Position();
+  for (let i = 0; i < moveStr.length; i++) { const col = parseInt(moveStr[i]); if (pos.canPlay(col)) pos.playCol(col); }
+  const scores = solve(pos);
+  let best = pos.getValidMoves()[0], bestScore = -Infinity;
+  for (let c=0; c<W; c++) { if (scores[c] !== null && scores[c] > bestScore) { bestScore = scores[c]; best = c; } }
+  return best;
+}
+
+self.onmessage = function(e) { self.postMessage({ bestMove: getBestMove(e.data.moveStr) }); };
+`;
+  
+  const blob = new Blob([workerCode], { type: 'application/javascript' });
+  aiWorker = new Worker(URL.createObjectURL(blob));
+  
+  aiWorker.onmessage = function(e) {
+    const aiCol = e.data.bestMove;
+    moveStr += String(aiCol);
+    aiPosition.playCol(aiCol);
+    renderGameState();
+  };
+}
+const columnOrder = [3, 4, 2, 5, 1, 6, 0]; // Center columns first (like Pascal Pons)
+
+const W = 7, H = 6;
+const MIN_SCORE = -(W*H)/2 + 3;
+const MAX_SCORE = (W*H+1)/2 - 3;
+const BOTTOM = (1n<<0n)|(1n<<7n)|(1n<<14n)|(1n<<21n)|(1n<<28n)|(1n<<35n)|(1n<<42n);
+const BOARD = BOTTOM * ((1n<<BigInt(H))-1n);
 
 function colMask(c) { return (((1n<<BigInt(H))-1n) << (BigInt(c)*BigInt(H+1))); }
 function topMask(c) { return 1n << (BigInt(H-1)+BigInt(c)*BigInt(H+1)); }
@@ -681,10 +765,9 @@ function negamax(pos, alpha, beta) {
     }
   }
   
-  // Sort moves - center first
+  // Use columnOrder for move ordering (center first - like Pascal Pons)
   const moves = pos.getValidMoves().sort((a,b) => {
-    const ma = colMask(a), mb = colMask(b);
-    return popcnt(computeWinPos(pos.cur|ma, pos.mask)) - popcnt(computeWinPos(pos.cur|mb, pos.mask));
+    return columnOrder.indexOf(a) - columnOrder.indexOf(b);
   });
   
   for (const c of moves) {
@@ -702,59 +785,95 @@ function negamax(pos, alpha, beta) {
 function solveAI(pos) {
   aiTransTable.clear();
   const scores = [];
-  for(let c=0;c<W;c++) {
+  // Use columnOrder (center first) for better move ordering
+  for(let i=0; i<columnOrder.length; i++) {
+    const c = columnOrder[i];
     if (!pos.canPlay(c)) { scores[c] = null; continue; }
     if (pos.isWinning(c)) { scores[c] = (W*H+1-pos.moves)/2; continue; }
+    // Skip moves that allow opponent to win immediately (speedup)
     const p2 = pos.clone();
     p2.playCol(c);
+    if (p2.oppWinPos() !== 0n) { scores[c] = null; continue; }
     scores[c] = -negamax(p2, -100, 100);
   }
   return scores;
 }
 
 function aiGetBestMove(pos) {
-  const scores = solveAI(pos);
-  let best = pos.getValidMoves()[0], bestScore = -Infinity;
-  for(let c=0;c<W;c++) {
-    if (scores[c] !== null && scores[c] > bestScore) {
-      bestScore = scores[c];
-      best = c;
-    }
+  // Use columnOrder for better move selection (like Pascal Pons solver)
+  const moves = pos.getValidMoves();
+  if (moves.length === 0) return 0;
+  
+  // Try to find a winning move first
+  for (const c of moves) {
+    if (pos.isWinning(c)) return c;
   }
-  return best;
+  
+  // Check if opponent can win next move and block
+  for (const c of moves) {
+    const p2 = pos.clone();
+    p2.playCol(c);
+    if (p2.oppWinPos() !== 0n) return c;
+  }
+  
+  // Prefer center columns (better strategic positions)
+  for (const c of columnOrder) {
+    if (moves.includes(c)) return c;
+  }
+  
+  return moves[0];
 }
 
-function startAI() {
-  aiMode = true;
-  roomCode = '';
+async function createRoom() {
+  if (!db) { document.getElementById('firebase-notice').style.display='block'; return; }
+  let code, snap;
+  do {
+    code = String(Math.floor(1000 + Math.random() * 9000));
+    snap = await db.ref('rooms/'+code).once('value');
+  } while(snap.exists());
+
+  roomCode = code;
   myPlayer = P1;
-  moveStr = '';
-  scores = {1:0, 2:0};
-  gameOver = false;
-  aiPosition = new AIPosition();
-  aiTransTable.clear();
-  
-  // Update UI for AI mode
-  document.getElementById('game-room-code').textContent = 'AI';
-  document.getElementById('player-badge').innerHTML = 'Player 1 (X) - YOU';
-  document.getElementById('player-badge').style.color = 'var(--cyan)';
-  document.getElementById('new-game-btn').style.display = 'none';
-  document.getElementById('move-str-container').style.display = 'none';
-  document.getElementById('fb-dot').style.display = 'none';
-  document.getElementById('fb-status').style.display = 'none';
-  
-  updateScores();
-  show('screen-game');
-  renderGameState();
+  await db.ref('rooms/'+code).set({ moves:'', scores:'0,0', ng:0, joined:false, created: Date.now() });
+  document.getElementById('display-code').textContent = code;
+  show('screen-waiting');
+
+  // Watch for P2 to join
+  db.ref('rooms/'+code+'/joined').on('value', snap => {
+    if (snap.val() === true) {
+      db.ref('rooms/'+code+'/joined').off();
+      enterGame(code);
+    }
+  });
+}
+
+async function joinRoom() {
+  if (!db) { document.getElementById('firebase-notice').style.display='block'; return; }
+  const v = document.getElementById('join-code').value.trim();
+  if (!/^\d{4}$/.test(v)) { lobbyErr('Enter a 4-digit code'); return; }
+
+  const snap = await db.ref('rooms/'+v).once('value');
+  if (!snap.exists())       { lobbyErr('Room not found'); return; }
+  if (snap.val().joined)    { lobbyErr('Room is full');   return; }
+
+  roomCode = v;
+  myPlayer = P2;
+  await db.ref('rooms/'+v+'/joined').set(true);  // notifies P1's waiting screen
+  enterGame(v);
+}
+
+function cancelRoom() {
+  db.ref('rooms/'+roomCode+'/joined').off();
+  db.ref('rooms/'+roomCode).remove();
+  roomCode='';
+  show('screen-lobby');
 }
 
 // ================================================================
 //  GAME
 // ================================================================
 function enterGame(code) {
-  aiMode = false;
   roomCode=code; moveStr=''; scores={1:0,2:0}; gameOver=false;
-  aiPosition = null;  // Reset AI position
   document.getElementById('game-room-code').textContent = code;
   const badge = myPlayer===P1 ? 'Player 1  X (cyan)' : 'Player 2  0 (red)';
   const col   = myPlayer===P1 ? 'var(--cyan)' : 'var(--orange)';
@@ -861,47 +980,13 @@ function renderGameState() {
     setStatus("Draw! The board is full.", 'st-draw');
     setCols(false); document.getElementById('new-game-btn').style.display='block';
   } else {
-    if (aiMode) {
-      // AI mode: P1 = human, P2 = AI
-      if (turn === P1) {
-        setStatus(`Your turn (X)`, 'st-turn');
-        setCols(true, board);
-      } else {
-        setStatus(`AI thinking...`, 'st-wait');
-        setCols(false);
-        setTimeout(aiMove, 50);
-      }
+    if (turn===myPlayer) {
+      setStatus(`Player ${myPlayer}'s turn (${sym(myPlayer)})`, 'st-turn');
+      setCols(true, board);
     } else {
-      if (turn===myPlayer) {
-        setStatus(`Player ${myPlayer}'s turn (${sym(myPlayer)})`, 'st-turn');
-        setCols(true, board);
-      } else {
-        setStatus(`Player ${turn}'s turn (${sym(turn)})`, 'st-wait');
-        setCols(false);
-      }
+      setStatus(`Player ${turn}'s turn (${sym(turn)})`, 'st-wait');
+      setCols(false);
     }
-  }
-}
-
-// AI move function
-function aiMove() {
-  if (gameOver || !aiMode) return;
-  
-  const bestCol = aiGetBestMove(aiPosition);
-  aiPosition.playCol(bestCol);
-  moveStr += String(bestCol);
-  
-  // Check for win/draw after AI move
-  const board = replayMoves(moveStr);
-  const winPos = checkWin(board, P2);
-  const draw = !winPos && isFull(board);
-  
-  if (winPos || draw) {
-    gameOver = true;
-    renderGameState();
-    document.getElementById('new-game-btn').style.display = 'block';
-  } else {
-    renderGameState();
   }
 }
 
@@ -909,28 +994,39 @@ function aiMove() {
 function playColumn(col) {
   if (gameOver) return;
   const board = replayMoves(moveStr);
+  const currentPlayer = (moveStr.length % 2 === 0) ? P1 : P2;
   
+  // In AI mode, only allow human (P1) to play
   if (aiMode) {
-    // AI mode: only allow P1 (human) moves
-    if ((moveStr.length % 2) !== 0) return; // Not human's turn
-    if (colFull(board, col)) return;
+    if (currentPlayer !== P1) return; // Not human's turn
+    if (colFull(board,col)) return;
     if (moveStr.length >= 42) return;
     
-    // Update move string
+    // Human plays
     moveStr += String(col);
-    
-    // Update AI position
     aiPosition.playCol(col);
-    
-    // Render and check for win
     renderGameState();
-  } else {
-    // Firebase multiplayer mode
-    if ((moveStr.length%2===0 ? P1 : P2) !== myPlayer) return;
-    if (colFull(board,col)) return;
-    if (moveStr.length>=42) return;
-    db.ref('rooms/'+roomCode+'/moves').set(moveStr + String(col));
+    
+    // Check if game ended
+    if (gameOver) return;
+    
+    // Use fast heuristic AI (center preference, blocks wins, takes wins)
+    setStatus('AI thinking...', 'st-wait');
+    setTimeout(() => {
+      if (gameOver || moveStr.length >= 42) return;
+      const aiCol = aiGetBestMove(aiPosition);
+      moveStr += String(aiCol);
+      aiPosition.playCol(aiCol);
+      renderGameState();
+    }, 100);
+    return;
   }
+  
+  // Regular multiplayer mode
+  if (currentPlayer !== myPlayer) return;
+  if (colFull(board,col)) return;
+  if (moveStr.length>=42) return;
+  db.ref('rooms/'+roomCode+'/moves').set(moveStr + String(col));
 }
 
 function requestNewGame() {
@@ -941,13 +1037,11 @@ function requestNewGame() {
 }
 
 function leaveGame() {
-  if (roomCode && !aiMode) {
+  if (roomCode) {
     ['moves','scores','ng'].forEach(k=>db.ref('rooms/'+roomCode+'/'+k).off());
     db.ref('.info/connected').off();
   }
-  roomCode=''; moveStr=''; scores={1:0,2:0}; gameOver=false; myPlayer=0;
-  aiMode = false;
-  aiPosition = null;
+  roomCode=''; moveStr=''; scores={1:0,2:0}; gameOver=false; myPlayer=0; aiMode=false;
   const btn=document.getElementById('new-game-btn');
   btn.style.display='none'; btn.disabled=false;
   btn.querySelector('.mt').textContent='Play again? (y/n): y ↵';
@@ -967,10 +1061,26 @@ document.addEventListener('keydown', e => {
 });
 
 // ================================================================
+//  CLEANUP — delete rooms older than 24 hours on lobby load
+// ================================================================
+function cleanOldRooms() {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 hours ago
+  db.ref('rooms').once('value', snap => {
+    snap.forEach(child => {
+      const created = child.val().created;
+      if (!created || created < cutoff) {
+        db.ref('rooms/'+child.key).remove();
+      }
+    });
+  });
+}
+
+// ================================================================
 //  BOOT
 // ================================================================
 window.onload = () => {
   const ok = initFirebase();
+  if (ok) cleanOldRooms();
   if (!ok) document.getElementById('firebase-notice').style.display='block';
   renderBoard(createBoard());
 };
