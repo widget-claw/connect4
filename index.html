@@ -412,11 +412,8 @@ function initFirebase() {
   try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
-    return true;
-  } catch(e) { 
-    console.log('Firebase init error:', e);
-    return false; 
-  }
+    return firebaseConfig.apiKey !== 'YOUR_API_KEY';
+  } catch(e) { return false; }
 }
 
 // ================================================================
@@ -605,14 +602,14 @@ const MAX_SCORE = (W*H+1)/2 - 3;
 const BOTTOM = (1n<<0n)|(1n<<7n)|(1n<<14n)|(1n<<21n)|(1n<<28n)|(1n<<35n)|(1n<<42n);
 const BOARD = BOTTOM * ((1n<<H)-1n);
 
-function colMask(c) { return (((1n<<BigInt(H))-1n) << (BigInt(c)*BigInt(H+1))); }
-function topMask(c) { return 1n << (BigInt(H-1)+BigInt(c)*BigInt(H+1)); }
-function botMask(c) { return 1n << (BigInt(c)*BigInt(H+1)); }
+function colMask(c) { return (((1n<<H)-1n) << BigInt(c*(H+1))); }
+function topMask(c) { return 1n << BigInt((H-1)+c*(H+1)); }
+function botMask(c) { return 1n << BigInt(c*(H+1)); }
 
 function popcnt(m) { let c=0n; for(;m;m&=m-1n)c++; return Number(c); }
 
 function computeWinPos(pos, mask) {
-  let r = (pos<<BigInt(1n))&(pos<<BigInt(2n))&(pos<<BigInt(3n));
+  let r = (pos<<1n)&(pos<<2n)&(pos<<3n);
   let p = (pos<<BigInt(H+1))&(pos<<BigInt(2*(H+1)));
   r |= p & (pos<<BigInt(3*(H+1))) | p & (pos>>BigInt(H+1));
   p = (pos>>BigInt(H+1))&(pos>>BigInt(2*(H+1)));
@@ -628,34 +625,45 @@ function computeWinPos(pos, mask) {
   return r & (BOARD ^ mask);
 }
 
-function AIPosition() { 
-  this.cur = 0n; 
-  this.mask = 0n; 
-  this.moves = 0; 
+class AIPosition {
+  constructor() {
+    this.cur = 0n;
+    this.mask = 0n;
+    this.moves = 0;
+  }
   
-  this.clone = function() { 
-    const p = new AIPosition(); 
-    p.cur = this.cur; p.mask = this.mask; p.moves = this.moves; 
-    return p; 
-  };
-  this.key = function() { return this.cur + this.mask; };
-  this.canPlay = function(c) { return (this.mask & topMask(c)) === 0n; };
-  this.canWinNext = function() { return (this.winningPos() & this.possible()) !== 0n; };
-  this.winningPos = function() { return computeWinPos(this.cur, this.mask); };
-  this.oppWinPos = function() { return computeWinPos(this.cur ^ this.mask, this.mask); };
-  this.possible = function() { return (this.mask + BOTTOM) & BOARD; };
-  this.isWinning = function(c) { return (this.winningPos() & this.possible() & colMask(c)) !== 0n; };
-  this.playCol = function(c) {
+  clone() {
+    const p = new AIPosition();
+    p.cur = this.cur; p.mask = this.mask; p.moves = this.moves;
+    return p;
+  }
+  
+  key() { return this.cur + this.mask; }
+  
+  canPlay(c) { return (this.mask & topMask(c)) === 0n; }
+  
+  canWinNext() { return (this.winningPos() & this.possible()) !== 0n; }
+  
+  winningPos() { return computeWinPos(this.cur, this.mask); }
+  
+  oppWinPos() { return computeWinPos(this.cur ^ this.mask, this.mask); }
+  
+  possible() { return (this.mask + BOTTOM) & BOARD; }
+  
+  isWinning(c) { return (this.winningPos() & this.possible() & colMask(c)) !== 0n; }
+  
+  playCol(c) {
     const m = (this.mask + botMask(c)) & colMask(c);
     this.cur ^= this.mask;
     this.mask |= m;
     this.moves++;
-  };
-  this.getValidMoves = function() { 
-    const m = []; 
-    for(let c=0;c<W;c++) if(this.canPlay(c)) m.push(c); 
-    return m; 
-  };
+  }
+  
+  getValidMoves() {
+    const m = [];
+    for(let c=0;c<W;c++) if(this.canPlay(c)) m.push(c);
+    return m;
+  }
 }
 
 const aiTransTable = new Map();
