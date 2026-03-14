@@ -404,6 +404,7 @@ let gameOver  = false;
 // AI mode state
 let aiMode = false;
 let aiPosition = null;
+let aiTransTable = new Map();
 
 // ================================================================
 //  FIREBASE INIT
@@ -654,8 +655,6 @@ function AIPosition() {
     return m; 
   };
 }
-
-const aiTransTable = new Map();
 
 function negamax(pos, alpha, beta) {
   const possible = pos.possible();
