@@ -413,8 +413,11 @@ function initFirebase() {
   try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.database();
-    return firebaseConfig.apiKey !== 'YOUR_API_KEY';
-  } catch(e) { return false; }
+    return true;
+  } catch(e) { 
+    console.log('Firebase init error:', e);
+    return false; 
+  }
 }
 
 // ================================================================
