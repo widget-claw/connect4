@@ -420,8 +420,10 @@ function computeWinPos(pos, mask) {
   return r & (BOARD ^ mask);
 }
 
-class AIPosition {
-  constructor() { this.cur = 0n; this.mask = 0n; this.moves = 0; }
+function AIPosition() { 
+  this.cur = 0n; 
+  this.mask = 0n; 
+  this.moves = 0; 
 }
 
 AIPosition.prototype.clone = function() { 
