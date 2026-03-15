@@ -877,14 +877,28 @@ function playColumn(col) {
     renderGameState();
     if (gameOver) return;
     
-    // AI plays - try server first, fallback to local
+    // AI plays - use server for perfect play
     setStatus('AI thinking...', 'st-wait');
     
-    // Use local heuristic immediately (fast)
-    const aiCol = aiGetBestMove(aiPosition);
-    moveStr += String(aiCol);
-    aiPosition.playCol(aiCol);
-    renderGameState();
+    fetch('http://localhost:8765/move', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({moves: moveStr})
+    })
+    .then(r => r.json())
+    .then(data => {
+      const aiCol = data.move;
+      moveStr += String(aiCol);
+      aiPosition.playCol(aiCol);
+      renderGameState();
+    })
+    .catch(() => {
+      // Fallback to local heuristic
+      const aiCol = aiGetBestMove(aiPosition);
+      moveStr += String(aiCol);
+      aiPosition.playCol(aiCol);
+      renderGameState();
+    });
   }
   
   // Multiplayer mode
