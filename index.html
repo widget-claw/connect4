@@ -877,16 +877,14 @@ function playColumn(col) {
     renderGameState();
     if (gameOver) return;
     
-    // AI plays
+    // AI plays - try server first, fallback to local
     setStatus('AI thinking...', 'st-wait');
-    setTimeout(() => {
-      if (gameOver || moveStr.length >= 42) return;
-      const aiCol = aiGetBestMove(aiPosition);
-      moveStr += String(aiCol);
-      aiPosition.playCol(aiCol);
-      renderGameState();
-    }, 100);
-    return;
+    
+    // Use local heuristic immediately (fast)
+    const aiCol = aiGetBestMove(aiPosition);
+    moveStr += String(aiCol);
+    aiPosition.playCol(aiCol);
+    renderGameState();
   }
   
   // Multiplayer mode
