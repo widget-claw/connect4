@@ -134,8 +134,8 @@ function renderGameState() {
   let status, statusText;
   if (win) {
     const c = sCls(last);
-    status     = `<span class="${c}">P${last} ${sym(last)} wins!</span>`;
-    statusText = `P${last} ${sym(last)} wins!`;
+    status     = `<span class="${c}">P${last} Wins!</span>`;
+    statusText = `P${last} Wins!`;
     document.getElementById('new-game-btn').style.display = 'block';
   } else if (draw) {
     status     = "It's a draw.";
