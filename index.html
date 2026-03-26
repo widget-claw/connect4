@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CONNECT 4</title>
+<style>
+body { font-family:monospace; font-size:100px; line-height:1.0 }
+#board-display { display:inline-block; transform:scaleX(2); transform-origin:left center }
+pre { white-space:pre; margin:0 }
+.p1 { color:#00d4d4 }
+.p2 { color:#ef4c00 }
+.hdr { cursor:pointer }
+.hdr:hover { opacity:0.6 }
+.cw { animation:w 0.45s step-end infinite }
+@keyframes w { 0%,100%{opacity:1} 50%{opacity:0.1} }
+</style>
+</head>
+<body>
+<pre id="board-display"></pre>
+<pre id="status"></pre>
+<button id="new-game-btn" onclick="newGame()" style="display:none">Play again (n)</button>
+<script>
+const ROWS = 6, COLS = 7, EMPTY = 0, P1 = 1, P2 = 2;
+let moveStr = '', gameOver = false;
+
+function createBoard() {
+  return Array.from({ length: ROWS }, () => Array(COLS).fill(EMPTY));
+}
+
+function replayMoves(moveStr) {
+  const board = createBoard();
+  for (let i = 0; i < moveStr.length; i++) {
+    const col = parseInt(moveStr[i], 10);
+    const player = i % 2 === 0 ? P1 : P2;
+    for (let row = ROWS - 1; row >= 0; row--) {
+      if (board[row][col] === EMPTY) { board[row][col] = player; break; }
+    }
+  }
+  return board;
+}
+
+function checkWin(board, player) {
+  for (let row = 0; row < ROWS; row++)
+    for (let col = 0; col <= COLS - 4; col++)
+      if ([0,1,2,3].every(i => board[row][col+i] === player))
+        return [[row,col],[row,col+1],[row,col+2],[row,col+3]];
+  for (let row = 0; row <= ROWS - 4; row++)
+    for (let col = 0; col < COLS; col++)
+      if ([0,1,2,3].every(i => board[row+i][col] === player))
+        return [[row,col],[row+1,col],[row+2,col],[row+3,col]];
+  for (let row = 0; row <= ROWS - 4; row++)
+    for (let col = 0; col <= COLS - 4; col++)
+      if ([0,1,2,3].every(i => board[row+i][col+i] === player))
+        return [[row,col],[row+1,col+1],[row+2,col+2],[row+3,col+3]];
+  for (let row = 3; row < ROWS; row++)
+    for (let col = 0; col <= COLS - 4; col++)
+      if ([0,1,2,3].every(i => board[row-i][col+i] === player))
+        return [[row,col],[row-1,col+1],[row-2,col+2],[row-3,col+3]];
+  return null;
+}
+
+function isFull(board)    { return board[0].every(c => c !== EMPTY); }
+function colFull(b, col) { return b[0][col] !== EMPTY; }
+
+function renderBoard(board, winCells, turn) {
+  const winSet = new Set((winCells ?? []).map(([r, c]) => `${r},${c}`));
+  const pClass = turn === P1 ? 'p1' : 'p2';
+  const header = Array.from({ length: COLS }, (_, i) =>
+    `<span class="hdr" onmouseenter="this.classList.add('${pClass}')" onmouseleave="this.classList.remove('${pClass}')" onclick="playColumn(${i})">${i}</span>`
+  ).join('');
+  const lines = [];
+  for (let row = 0; row < ROWS; row++) {
+    let line = '';
+    for (let col = 0; col < COLS; col++) {
+      const k = `${row},${col}`, v = board[row][col];
+      if (winSet.has(k))      line += `<span class="cw ${v===P1?'p1':'p2'}">${v===P1?'X':'0'}</span>`;
+      else if (v === P1)      line += `<span class="p1">X</span>`;
+      else if (v === P2)      line += `<span class="p2">0</span>`;
+      else                    line += `<span>.</span>`;
+    }
+    lines.push(line);
+  }
+  document.getElementById('board-display').innerHTML =
+    header + '\n' + lines.join('\n');
+}
+
+function newGame() {
+  moveStr = ''; gameOver = false;
+  document.getElementById('new-game-btn').style.display = 'none';
+  renderGameState();
+}
+
+function playColumn(col) {
+  if (gameOver) return;
+  const board = replayMoves(moveStr);
+  if (colFull(board, col) || moveStr.length >= 42) return;
+  moveStr += col;
+  renderGameState();
+}
+
+function renderGameState() {
+  const board = replayMoves(moveStr);
+  const turn  = moveStr.length % 2 === 0 ? P1 : P2;
+  const last  = moveStr.length > 0 ? (moveStr.length % 2 === 0 ? P2 : P1) : null;
+  const win   = last ? checkWin(board, last) : null;
+  const draw  = !win && isFull(board);
+  gameOver = !!(win || draw);
+
+  renderBoard(board, win, turn);
+
+  const sym = p => p === P1 ? 'X' : '0';
+  const s   = document.getElementById('status');
+
+  if (win) {
+    s.innerHTML = `Player ${last} (${sym(last)}) wins!`;
+    document.getElementById('new-game-btn').style.display = 'block';
+  } else if (draw) {
+    s.innerHTML = "It's a draw.";
+    document.getElementById('new-game-btn').style.display = 'block';
+  } else {
+    s.innerHTML = `Player ${turn} (${sym(turn)})'s turn`;
+  }
+}
+
+document.addEventListener('keydown', e => {
+  const n = parseInt(e.key, 10);
+  if (n >= 0 && n <= 6)       playColumn(n);
+  else if ((e.key === 'n' || e.key === 'N') && gameOver) newGame();
+});
+
+window.onload = () => renderGameState();
+</script>
+</body>
+</html>
