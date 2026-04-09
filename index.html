@@ -1,201 +1,180 @@
 <!DOCTYPE html>
-<html lang="en">
+ <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>CONNECT 4</title>
-<style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; width: 100%; overflow: hidden; }
-body {
-  font-family: 'Courier New', Courier, monospace;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 8px;
-  background: #111;
-  color: #eee;
-  min-height: 100dvh;
+ <meta charset="UTF-8">
+ <title>Connect 4</title>
+ <style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+ body {
+ font-family: 'Courier New', monospace;
+ background: #111;
+ color: #eee;
+ display: flex;
+ align-items: center;
+ justify-content: center;
+ min-height: 100dvh;
+ padding: 16px; 
 }
-#board-display {
-  white-space: pre;
-  line-height: 0.8;
-  text-align: center;
-  display: block;
+
+pre {
+ white-space: pre;
+ line-height: 1;
+ font-size: 84px;
 }
-/* #status is rendered as the 8th line inside #board-display */
-#new-game-btn {
-  font-size: clamp(12px, 2.5vw, 18px);
-  padding: 8px 20px;
-  display: none;
-}
-.p1 { color:#00d4d4 }
-.p2 { color:#ef4c00 }
-.hdr { cursor:pointer }
-.hdr:hover { opacity:0.6 }
-.cw { animation:w 0.45s step-end infinite }
+
+.p1 { color: #00d4d4 } /* X is cyan */
+.p2 { color: #ef4c00 } /* O is orange */
+.win { animation: w 0.4s step-end infinite } /* winning pieces flash */ 
 @keyframes w { 0%,100%{opacity:1} 50%{opacity:0.1} }
-</style>
+ </style>
 </head>
 <body>
-<pre id="board-display"></pre>
-<button id="new-game-btn" onclick="newGame()">Play again (n)</button>
-<script>
-const ROWS = 6, COLS = 7, EMPTY = 0, P1 = 1, P2 = 2;
-let moveStr = '', gameOver = false;
+ <pre id="game"></pre>
 
-function createBoard() {
-  return Array.from({ length: ROWS }, () => Array(COLS).fill(EMPTY));
+  <script>
+var ROWS = 6, COLS = 7, EMPTY = 0, P1 = 1, P2 = 2;
+var moves = '', over = false;
+function getBoard() {
+      var b = [];
+      for (var r = 0; r < ROWS; r++) {
+            b[r] = [];
+            for (var c = 0; c < COLS; c++) b[r][c] = EMPTY;
+      }
+      for (var i = 0; i < moves.length; i++) {
+           var col = parseInt(moves.charAt(i), 10);
+           var player = (i % 2 === 0) ? P1 : P2;
+           for (var r = ROWS - 1; r >= 0; r--) {
+                 if (b[r][col] === EMPTY) { b[r][col] = player; break; }
+                 }
+           }
+      return b;
 }
 
-function replayMoves(moveStr) {
-  const board = createBoard();
-  for (let i = 0; i < moveStr.length; i++) {
-    const col = parseInt(moveStr[i], 10);
-    const player = i % 2 === 0 ? P1 : P2;
-    for (let row = ROWS - 1; row >= 0; row--) {
-      if (board[row][col] === EMPTY) { board[row][col] = player; break; }
-    }
-  }
-  return board;
+function getWinner(b, player) {
+     
+      var r, c, i, win;
+
+      for (r =  0; r < ROWS; r++) {
+            for (c = 0; c <= COLS - 4; c++) {
+                  win = [[r,c],[r,c+1],[r,c+2],[r,c+3]];
+                  for (i = 0; i < 4; i++) if (b[win[i][0]][win[i][1]] !== player)
+                  { win =null; break; }
+                  if (win) return win;
+            }
+      }
+      
+      for (r = 0; r <= ROWS - 4; r++){         
+            for (c = 0; c < COLS; c++) {
+                  win = [[r,c],[r+1,c],[r+2,c],[r+3,c]];
+                  for (i = 0; i < 4; i++) if (b[win[i][0]][win[i][1]] !==player)
+                  { win = null; break; }
+                  if (win) return win;
+            }
+      }
+   
+      for (r = 0; r <= ROWS - 4; r++) {
+            for (c = 0; c < COLS-4; c++) {
+                  win = [[r,c],[r+1,c+1],[r+2,c+2],[r+3,c+3]];
+                  for (i = 0; i < 4; i++) if (b[win[i][0]][win[i][1]] !== player)
+                  { win = null; break; }
+                  if (win) return win;
+            }
+      }
+       
+      for (r = 3; r < ROWS; r++) {
+            for (c = 0; c <= COLS - 4; c++) {
+                  win = [[r,c],[r-1,c+1],[r-2,c+2],[r-3,c+3]];
+                  for (i = 0; i < 4; i++) if (b[win[i][0]][win[i][1]] !== player)
+                  { win = null; break; }
+                  if (win) return win;
+            }
+     }
+     return null;
 }
 
-function checkWin(board, player) {
-  for (let row = 0; row < ROWS; row++)
-    for (let col = 0; col <= COLS - 4; col++)
-      if ([0,1,2,3].every(i => board[row][col+i] === player))
-        return [[row,col],[row,col+1],[row,col+2],[row,col+3]];
-  for (let row = 0; row <= ROWS - 4; row++)
-    for (let col = 0; col < COLS; col++)
-      if ([0,1,2,3].every(i => board[row+i][col] === player))
-        return [[row,col],[row+1,col],[row+2,col],[row+3,col]];
-  for (let row = 0; row <= ROWS - 4; row++)
-    for (let col = 0; col <= COLS - 4; col++)
-      if ([0,1,2,3].every(i => board[row+i][col+i] === player))
-        return [[row,col],[row+1,col+1],[row+2,col+2],[row+3,col+3]];
-  for (let row = 3; row < ROWS; row++)
-    for (let col = 0; col <= COLS - 4; col++)
-      if ([0,1,2,3].every(i => board[row-i][col+i] === player))
-        return [[row,col],[row-1,col+1],[row-2,col+2],[row-3,col+3]];
-  return null;
+function isFull(b) {
+for (var c = 0; c < COLS; c++) if (b[0][c] ===EMPTY) return false;
+return true;
 }
 
-function isFull(board)    { return board[0].every(c => c !== EMPTY); }
-function colFull(b, col) { return b[0][col] !== EMPTY; }
-
-function renderBoard(board, winCells, turn, status) {
-  const winSet = new Set((winCells ?? []).map(([r, c]) => `${r},${c}`));
-  const pClass = turn === P1 ? 'p1' : 'p2';
-  const header = Array.from({ length: COLS }, (_, i) =>
-    `<span class="hdr" onmouseenter="this.classList.add('${pClass}')" onmouseleave="this.classList.remove('${pClass}')" onclick="playColumn(${i})">${i}</span>`
-  ).join('');
-  const lines = [];
-  for (let row = 0; row < ROWS; row++) {
-    let line = '';
-    for (let col = 0; col < COLS; col++) {
-      const k = `${row},${col}`, v = board[row][col];
-      if (winSet.has(k))      line += `<span class="cw ${v===P1?'p1':'p2'}">${v===P1?'X':'0'}</span>`;
-      else if (v === P1)      line += `<span class="p1">X</span>`;
-      else if (v === P2)      line += `<span class="p2">0</span>`;
-      else                    line += `<span>.</span>`;
-    }
-    lines.push(line);
-  }
-  document.getElementById('board-display').innerHTML =
-    header + '\n' + lines.join('\n') + '\n' + status;
+function play(c) {
+if (over) return; 
+var b = getBoard();
+if (b[0][c] !== EMPTY) return;
+moves += c;
+render();
 }
 
 function newGame() {
-  moveStr = ''; gameOver = false;
-  document.getElementById('new-game-btn').style.display = 'none';
-  renderGameState();
+moves = ''; over = false;
+render();
 }
 
-function playColumn(col) {
-  if (gameOver) return;
-  const board = replayMoves(moveStr);
-  if (colFull(board, col) || moveStr.length >= 42) return;
-  moveStr += col;
-  renderGameState();
+function render() {
+      var b = getBoard();
+      var turn = (moves.length % 2 === 0) ? P1 : P2;
+      var last = (moves.length > 0) ? ((moves.length % 2 === 0) ? P2 : P1) : null;
+      var win = (last !==null) ? getWinner(b, last) : null;
+      var draw = (!win && isFull(b));
+      over = (win !== null || draw);
+      var winSet = {};
+      if (win) {
+            for (var i = 0; i < win.length; i++) {
+                 winSet[win[i][0] + ',' + win[i][1] ]= true;
+                 }
+            }
+      var html = '';
+      var cls, sym;
+        
+      cls = (turn === P1) ? 'p1' : 'p2';
+      for (var c =0; c < COLS; c++) {
+            html += '<span class="' + cls + '">' + c + '</span>'; 
+      } 
+
+      for (var r = 0; r < ROWS; r++) {
+            html += '\n';
+            for (var c = 0; c < COLS; c++) {
+            var key = r + ',' + c;
+            var v = b[r][c];
+            if (v === P1) html +=      '<span class="p1' + (winSet[key] ? ' win' : '') + '">X</span>';
+            else if (v === P2) html += '<span class="p2' + (winSet[key] ? ' win' : '') + '">0</span>';   
+            else html += '.';    
+            }
+      }
+
+      html += '\n';
+      if (win) {
+            cls = (last === P1) ? 'p1' : 'p2';
+            sym = (last === P1) ? 'X' : '0';
+            html += '<span class="' + cls + '">' + sym + ' wins!</span>'; 
+      } else if (draw) {
+            html += "Draw ";
+      } else {
+            cls = (turn === P1) ? 'p1' : 'p2';
+            sym = (turn === P1) ? 'X' : 'O';
+            html += '<span class="' + cls + '">' + sym + 's turn</span>';
+      } 
+      document.getElementById('game').innerHTML = html;
 }
 
-function renderGameState() {
-  const board = replayMoves(moveStr);
-  const turn  = moveStr.length % 2 === 0 ? P1 : P2;
-  const last  = moveStr.length > 0 ? (moveStr.length % 2 === 0 ? P2 : P1) : null;
-  const win   = last ? checkWin(board, last) : null;
-  const draw  = !win && isFull(board);
-  gameOver = !!(win || draw);
+document.onkeydown = function(e) {
+     if (e.key === 'Enter') { newGame(); return; }
+     if (over) return;
+     var n = parseInt(e.key, 10);
+     if (n >= 0 && n <= 6) play(n);
+};
 
-  const sym  = p => p === P1 ? 'X' : '0';
-  const sCls = p => p === P1 ? 'p1' : 'p2';
-  let status, statusText;
-  if (win) {
-    const c = sCls(last);
-    status     = `<span class="${c}">P${last} Wins!</span>`;
-    statusText = `P${last} Wins!`;
-    document.getElementById('new-game-btn').style.display = 'block';
-  } else if (draw) {
-    status     = "It's a draw.";
-    statusText = status;
-    document.getElementById('new-game-btn').style.display = 'block';
-  } else {
-    const c = sCls(turn);
-    status     = `<span class="${c}">P${turn} ${sym(turn)}</span>`;
-    statusText = `P${turn} ${sym(turn)}`;
-  }
+document.getElementById('game').onclick = function(e) {
+     if (over) {newGame (); return; }
+     var t = e.target; 
+     if (t.tagName !== 'SPAN') return;
+     var col =parseInt(t.innerHTML, 10);
+     if (col >=  0 && col <=  6) play(col); 
+};
 
-  const padL    = Math.floor((COLS - statusText.length) / 2);
-  const statusLine = ' '.repeat(Math.max(0, padL)) + status;
-
-  sizeBoard();
-  renderBoard(board, win, turn, statusLine);
-}
-
-document.addEventListener('keydown', e => {
-  const n = parseInt(e.key, 10);
-  if (n >= 0 && n <= 6)       playColumn(n);
-  else if ((e.key === 'n' || e.key === 'N') && gameOver) newGame();
-});
-
-function sizeBoard() {
-  const COLS = 7, ROWS_V = 8; // 8 text rows (1 header + 6 board + 1 status)
-  const pad  = 16;
-  const availW = (window.innerWidth  || 300) - pad;
-  const availH = (window.innerHeight || 500) - pad;
-
-  const mir = document.getElementById('_sz') || Object.assign(
-    document.createElement('span'),
-    { id:'_sz', style:'position:absolute;visibility:hidden;white-space:pre;pointer-events:none;display:block' }
-  );
-  const fam = getComputedStyle(document.getElementById('board-display')).fontFamily;
-  mir.style.fontFamily = fam;
-  document.body.appendChild(mir);
-
-  // Measure at browser default font size (~16px).
-  // charW0: width of one monospace character at default size.
-  // totalH0: total height of 7 text rows at default size.
-  mir.textContent = '0';
-  const charW0 = mir.getBoundingClientRect().width;
-
-  mir.textContent = Array(ROWS_V + 1).join('0\n');
-  const totalH0 = mir.getBoundingClientRect().height;
-  document.body.removeChild(mir);
-
-  // Both dimensions scale linearly with fontSize, so we can derive the
-  // max font that fits each axis from the default measurements:
-  //   charW(em)  = charW0  * em / 16  → emByW = 16 * availW / (COLS * charW0)
-  //   totalH(em) = totalH0 * em / 16  → emByH = 16 * availH / totalH0
-  const emByW = Math.floor(16 * availW / (COLS * charW0));
-  const emByH = Math.floor(16 * availH / totalH0);
-
-  document.getElementById('board-display').style.fontSize = Math.min(emByW, emByH) + 'px';
-}
-
-window.addEventListener('resize', sizeBoard);
-window.addEventListener('load', () => { sizeBoard(); renderGameState(); });
+newGame();
 </script>
+
 </body>
-</html>
+</html>.
+      
